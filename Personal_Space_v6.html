@@ -253,6 +253,7 @@
           <option value="">All Sources</option><option>Referral</option><option>Social Media</option><option>Walk-in</option><option>Cold Call</option><option>Event</option><option>Online Ad</option>
         </select>
         <label><input type="checkbox" id="filterStale" onchange="renderPipeline()"> Stale only</label>
+        <label><input type="checkbox" id="filterArchived" onchange="renderPipeline()"> Show archived</label>
       </div>
       <div class="stage-pills" id="stagePills">
         <button class="stage-pill active" onclick="scrollToStage('col-prospect',this)">Prospect</button>
@@ -344,6 +345,7 @@
         </div>
       </div>
       <!-- SIP Log Widget -->
+      <div id="pipeline-metrics" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-bottom:12px;"></div>
       <div class="sip-widget-box">
         <div class="sip-widget-title">📈 SIP Change Log <button onclick="openSipLogModal()" style="background:none;border:none;color:var(--primary);font-size:.7rem;cursor:pointer;margin-left:6px;">+ Add / View All</button></div>
         <div id="sipLogWidget"></div>
@@ -473,6 +475,12 @@
       <div id="targets-summary" style="font-size:.76rem;color:var(--text-muted);"></div>
     </div>
     <div class="settings-section">
+      <h3>🎨 Appearance</h3>
+      <label style="display:flex;align-items:center;gap:8px;font-size:.78rem;color:var(--text-muted);">
+        <input type="checkbox" id="darkModeToggle" onchange="toggleDarkMode(this.checked)"> Enable dark mode
+      </label>
+    </div>
+    <div class="settings-section">
       <h3>📋 Audit Log</h3>
       <div id="audit-log-display"></div>
     </div>
@@ -497,7 +505,18 @@
           minutes
         </label>
       </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0;">
+        <label style="font-size:.75rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
+          <input type="checkbox" id="cloudSyncEnabled" onchange="toggleCloudSync(this.checked)"> Enable cloud sync webhook
+        </label>
+        <input id="cloudSyncUrl" placeholder="https://your-api/backup" oninput="setCloudSyncUrl(this.value)" style="flex:1;min-width:220px;padding:6px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);">
+      </div>
       <div id="backup-status" style="font-size:.72rem;color:var(--text-dim);"></div>
+      <div id="backup-health" style="font-size:.72rem;color:var(--text-dim);margin-top:4px;"></div>
+    </div>
+    <div class="settings-section">
+      <h3>🗃️ Archived Leads</h3>
+      <div id="archived-leads" style="font-size:.75rem;color:var(--text-muted);"></div>
     </div>
   </div>
 

@@ -44,7 +44,7 @@ let clientDetailIndex = {};
 let personalChart     = null;
 let trendChart        = null;
 let autoBackupTimer   = null;
-let prefs             = { backupEnabled:false, backupIntervalMin:15, backupFolderConnected:false, lastBackupAt:null };
+let prefs             = { backupEnabled:false, backupIntervalMin:15, backupFolderConnected:false, lastBackupAt:null, darkMode:false, cloudSyncEnabled:false, cloudSyncUrl:'', lastCloudSyncAt:null };
 let editingEntryId    = null;
 
 /* ══ CONSTANTS ══ */
@@ -68,6 +68,32 @@ function isValidEmail(v){return !v||/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);}
 function isValidPhone(v){return !v||/^[0-9]{10,15}$/.test(v.replace(/\D/g,''));}
 function safeId(v){return String(v||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')||'client';}
 function getStaleDays(){return{'col-prospect':parseInt(targets.staleProspect)||5,'col-contacted':parseInt(targets.staleContacted)||7,'col-proposal':parseInt(targets.staleProposal)||10,'col-potential':parseInt(targets.stalePotential)||21};}
+function genId(){return (window.crypto&&crypto.randomUUID)?crypto.randomUUID():'id-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);}
+function validateLead(lead){
+  if(!lead||typeof lead!=='object') return null;
+  if(!lead.id) lead.id=genId();
+  if(!lead.name) return null;
+  lead.stage=STAGES.includes(lead.stage)?lead.stage:'col-prospect';
+  lead.products=Array.isArray(lead.products)?lead.products:[];
+  lead.history=Array.isArray(lead.history)?lead.history:[];
+  lead.createdAt=lead.createdAt||Date.now();
+  lead.stageEntryDate=lead.stageEntryDate||lead.createdAt;
+  lead.deletedAt=lead.deletedAt||null;
+  lead.muted=!!lead.muted;
+  if(lead.nextAction){lead.nextFollowUpDate=lead.nextAction;lead.followUpStatus=lead.nextAction<todayISO()?'overdue':'scheduled';}
+  else {lead.nextFollowUpDate='';lead.followUpStatus='none';}
+  return lead;
+}
+function validateEntry(entry){
+  if(!entry||typeof entry!=='object'||!entry.text) return null;
+  if(!entry.id) entry.id=genId();
+  entry.type=['Note','Task','Habit'].includes(entry.type)?entry.type:'Note';
+  entry.tags=Array.isArray(entry.tags)?entry.tags:[];
+  entry.linkedLeadIds=Array.isArray(entry.linkedLeadIds)?entry.linkedLeadIds.filter(Boolean):[];
+  entry.linkedLeadId=entry.linkedLeadId||entry.linkedLeadIds[0]||'';
+  entry.sourceType=entry.sourceType||'manual-log';
+  return entry;
+}
 
 function normKey(v){return String(v||'').toLowerCase().replace(/[^a-z0-9]/g,'');}
 function extractClientTags(text){return [...new Set((String(text||'').match(/#([A-Za-z][A-Za-z0-9_-]*)/g)||[]).map(t=>t.slice(1)))];}
@@ -126,10 +152,14 @@ function loadAll(){
   try{ prefs = {...prefs,...JSON.parse(localStorage.getItem(PREF_KEY)||'{}')}; }catch(e){}
   if(!Array.isArray(entries)) entries=[];
   if(!Array.isArray(leads))   leads=[];
+  entries=entries.map(validateEntry).filter(Boolean);
+  leads=leads.map(validateLead).filter(Boolean);
   if(!Array.isArray(sipLog))  sipLog=[];
   if(!Array.isArray(goals))   goals=[];
   if(!Array.isArray(reviews)) reviews=[];
 }
+
+function applyTheme(){document.body.setAttribute('data-theme',prefs.darkMode?'dark':'light');const t=$('darkModeToggle');if(t)t.checked=!!prefs.darkMode;}
 
 function saveAll(){
   localStorage.setItem(PS_KEY,     JSON.stringify(entries));
@@ -169,6 +199,14 @@ async function connectBackupFolder(){
   }
 }
 
+async function syncCloudBackup(payload){
+  if(!prefs.cloudSyncEnabled||!prefs.cloudSyncUrl) return;
+  try{
+    await fetch(prefs.cloudSyncUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    prefs.lastCloudSyncAt=Date.now();
+  }catch(e){ addAudit('Cloud sync failed'); }
+}
+
 async function runManualBackup(){
   if(!prefs.backupEnabled && !window.__kkBackupDirHandle) return;
   if(!window.__kkBackupDirHandle){ updateBackupUI('Connect folder to start backups.'); return; }
@@ -179,6 +217,7 @@ async function runManualBackup(){
     await writable.write(JSON.stringify(getUnifiedPayload(),null,2));
     await writable.close();
     prefs.lastBackupAt=Date.now();
+    await syncCloudBackup(getUnifiedPayload());
     addAudit('Backup snapshot created');
     saveAll();
     updateBackupUI();
@@ -202,6 +241,10 @@ function updateBackupInterval(v){
   saveAll();
 }
 
+function toggleCloudSync(enabled){prefs.cloudSyncEnabled=!!enabled;saveAll();updateBackupUI();}
+function setCloudSyncUrl(v){prefs.cloudSyncUrl=sanitize(v);saveAll();}
+function toggleDarkMode(enabled){prefs.darkMode=!!enabled;applyTheme();saveAll();}
+
 function scheduleAutoBackup(){
   if(autoBackupTimer) clearInterval(autoBackupTimer);
   if(prefs.backupEnabled) autoBackupTimer=setInterval(runManualBackup,prefs.backupIntervalMin*60000);
@@ -213,11 +256,18 @@ function updateBackupUI(msg){
   const interval=$('backupInterval');
   if(enabled) enabled.checked=!!prefs.backupEnabled;
   if(interval) interval.value=prefs.backupIntervalMin||15;
+  const cse=$('cloudSyncEnabled'); if(cse) cse.checked=!!prefs.cloudSyncEnabled;
+  const csu=$('cloudSyncUrl'); if(csu) csu.value=prefs.cloudSyncUrl||'';
   if(!status) return;
   if(msg){status.textContent=msg;return;}
   const connected=window.__kkBackupDirHandle||prefs.backupFolderConnected;
   const last=prefs.lastBackupAt?new Date(prefs.lastBackupAt).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'Never';
   status.textContent=`Status: ${connected?'Folder connected':'No folder connected'} · Last backup: ${last}`;
+  const bh=$('backup-health'); if(bh){
+    const stale=prefs.lastBackupAt?daysSince(prefs.lastBackupAt):999;
+    const cloud=prefs.lastCloudSyncAt?`Cloud: ${new Date(prefs.lastCloudSyncAt).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}`:'Cloud: never';
+    bh.textContent=`Backup health: ${stale<=1?'🟢 Healthy':stale<=7?'🟡 Delayed':'🔴 Stale'} · ${cloud}`;
+  }
 }
 
 /* ══ EXPORT / IMPORT ══ */
@@ -242,6 +292,8 @@ function importUnifiedJSON(ev){
       if(data.goals    &&Array.isArray(data.goals))     goals=data.goals;
       if(data.reviews  &&Array.isArray(data.reviews))   reviews=data.reviews;
       if(Array.isArray(data)) leads=data; // legacy leads-only
+      entries=entries.map(validateEntry).filter(Boolean);
+      leads=leads.map(validateLead).filter(Boolean);
       saveAll();renderAll();
       addAudit(`Imported — ${entries.length} entries, ${leads.length} leads`);
       alert(`✅ Imported!\nEntries: ${entries.length} | Leads: ${leads.length}`);
@@ -427,7 +479,7 @@ function saveEntry(){
   if(editingEntryId){
     entries=entries.map(e=>e.id===editingEntryId?{
       ...e,
-      text,type,priority,reminder,energy:currentMood,tags:clientTags,linkedLeadIds,
+      text,type,priority,reminder,energy:currentMood,tags:clientTags,linkedLeadId:linkedLeadIds[0]||'',linkedLeadIds,linkedTaskId:e.linkedTaskId||null,sourceType:e.sourceType||'manual-log',
       done:type==='Task'?e.done:false,
       updatedAt:new Date().toISOString()
     }:e);
@@ -443,10 +495,13 @@ function saveEntry(){
     addAudit(`Log entry updated (${type})${linkedLeadIds.length?' — linked: '+linkedLeadIds.join(', '):''}`);
   } else {
     const entry={
-      id:now,text,type,priority,reminder,
+      id:genId(),text,type,priority,reminder,
       energy:currentMood,done:false,
       tags:clientTags,
+      linkedLeadId:linkedLeadIds[0]||'',
       linkedLeadIds,
+      linkedTaskId:null,
+      sourceType:'manual-log',
       date:new Date().toISOString(),
       dateShort:fmtDate(now)
     };
@@ -586,7 +641,7 @@ function countStreak(habitEntries,name){
 
 function logHabit(name,checked){
   if(!checked) return;
-  entries.unshift({id:Date.now(),text:`🔄 HABIT: ${name}`,type:'Habit',priority:null,reminder:null,energy:currentMood,done:false,tags:[],linkedLeadIds:[],date:new Date().toISOString(),dateShort:fmtDate(Date.now())});
+  entries.unshift({id:genId(),text:`🔄 HABIT: ${name}`,type:'Habit',priority:null,reminder:null,energy:currentMood,done:false,tags:[],linkedLeadId:'',linkedLeadIds:[],linkedTaskId:null,sourceType:'habit-check',date:new Date().toISOString(),dateShort:fmtDate(Date.now())});
   saveAll();
 }
 
@@ -616,7 +671,7 @@ function saveReview(){
   const challenges=$('review-challenges').value.trim();
   const tomorrow=$('review-tomorrow').value.trim();
   if(!score){alert('Please enter a review score.');return;}
-  reviews.unshift({id:Date.now(),score,date,wins,challenges,tomorrow});
+  reviews.unshift({id:genId(),score,date,wins,challenges,tomorrow});
   saveAll();renderReviews();
   $('review-score').value='';$('review-wins').value='';$('review-challenges').value='';$('review-tomorrow').value='';
 }
@@ -765,7 +820,7 @@ function renderGoalsModal(){
 }
 function addGoal(){
   const text=$('new-goal-text').value.trim(); if(!text) return;
-  goals.push({text,done:false,created:Date.now()});
+  goals.push({id:genId(),text,done:false,created:Date.now()});
   $('new-goal-text').value='';
   saveAll();renderGoalsModal();
 }
@@ -852,7 +907,7 @@ function renderLeadFlow(){
 /* ══ LEAD ID GENERATOR ══ */
 function generateLeadID(){
   const yr=new Date().getFullYear();
-  const max=leads.reduce((m,l)=>Math.max(m,parseInt((l.id||'').split('-')[2])||0),0);
+  const max=leads.reduce((m,l)=>Math.max(m,parseInt((l.clientCode||'').split('-')[2])||0),0);
   return `KK-${yr}-${String(max+1).padStart(3,'0')}`;
 }
 
@@ -953,7 +1008,8 @@ function submitLeadForm(){
   if(!name){alert('Client name is required.');return;}
   if(!isValidPhone(phone)){alert('Enter a valid phone number (10-15 digits).');return;}
   if(!isValidEmail(email)){alert('Enter a valid email address.');return;}
-  const data={name,phone,email,referredBy,products:prods,value:totalValue(prods),revType:$('revType').value,source:$('source').value,temp:$('temp').value,nextAction:$('nextAction').value,actualValue:parseFloat($('actualValue')?.value)||0,lossReason:$('lossReason')?.value||'',lastUpdated:Date.now()};
+  const nextAction=$('nextAction').value;
+  const data={name,phone,email,referredBy,products:prods,value:totalValue(prods),revType:$('revType').value,source:$('source').value,temp:$('temp').value,nextAction,followUpStatus:nextAction?(nextAction<todayISO()?'overdue':'scheduled'):'none',nextFollowUpDate:nextAction||'',actualValue:parseFloat($('actualValue')?.value)||0,lossReason:$('lossReason')?.value||'',lastUpdated:Date.now()};
   if(id){
     leads=leads.map(l=>{
       if(l.id!==id) return l;
@@ -967,7 +1023,7 @@ function submitLeadForm(){
     const newId=generateLeadID();
     const hist=[{date:fmtDate(Date.now()),msg:'🆕 Lead Created'}];
     if(note) hist.unshift({date:fmtDate(Date.now()),msg:'💬 '+note});
-    leads.push({...data,id:newId,stage:'col-prospect',createdAt:Date.now(),stageEntryDate:Date.now(),history:hist});
+    leads.push(validateLead({...data,id:genId(),clientCode:newId,stage:'col-prospect',createdAt:Date.now(),stageEntryDate:Date.now(),history:hist,muted:false,deletedAt:null}));
     addAudit(`New lead: ${name} (${newId})`);
   }
   saveAll();renderLeadFlow();closeLeadModal();
@@ -1021,7 +1077,7 @@ function confirmProdWon(){
   $('prodWonModal').style.display='none';
   if(addSip&&sipAmt>0){
     const lead=leads.find(l=>l.id===pendingProdAction.leadId);
-    sipLog.push({id:Date.now(),date:todayISO(),client:lead?.name||'',type:'add',amount:sipAmt,note:`From won deal: ${lead?.products[pendingProdAction.prodIdx]?.product||''}`});
+    sipLog.push({id:genId(),date:todayISO(),client:lead?.name||'',type:'add',amount:sipAmt,note:`From won deal: ${lead?.products[pendingProdAction.prodIdx]?.product||''}`});
   }
   applyProdStatus(pendingProdAction.leadId,pendingProdAction.prodIdx,'won',{actualValue:rev});
   pendingProdAction=null;
@@ -1072,8 +1128,10 @@ function quickNote(id){
   saveAll();renderLeadFlow();
 }
 
-/* ══ DELETE LEAD ══ */
-function deleteLead(id){if(!confirm('Delete this lead permanently?'))return;leads=leads.filter(l=>l.id!==id);addAudit(`Deleted lead: ${id}`);saveAll();renderLeadFlow();}
+/* ══ ARCHIVE / RESTORE LEAD ══ */
+function archiveLead(id){if(!confirm('Archive this lead? You can restore later.'))return;leads=leads.map(l=>l.id===id?{...l,deletedAt:Date.now()}:l);addAudit(`Archived lead: ${id}`);saveAll();renderLeadFlow();}
+function restoreLead(id){leads=leads.map(l=>l.id===id?{...l,deletedAt:null}:l);addAudit(`Restored lead: ${id}`);saveAll();renderLeadFlow();renderSettings();}
+function toggleLeadMute(id){leads=leads.map(l=>l.id===id?{...l,muted:!l.muted}:l);saveAll();renderLeadFlow();}
 
 /* ══ RENDER PIPELINE ══ */
 function renderPipeline(){
@@ -1081,6 +1139,7 @@ function renderPipeline(){
   const fTemp=$('filterTemp')?.value||'';
   const fSource=$('filterSource')?.value||'';
   const fStale=$('filterStale')?.checked||false;
+  const showArchived=$('filterArchived')?.checked||false;
   const today=todayISO();
   const staleDays=getStaleDays();
   const todays=[];
@@ -1089,6 +1148,7 @@ function renderPipeline(){
     const staleLimit=staleDays[stage]||99;
     const filtered=leads.filter(l=>{
       if(l.stage!==stage) return false;
+      if(!showArchived && l.deletedAt) return false;
       if(!l.name.toLowerCase().includes(search)) return false;
       if(fTemp&&l.temp!==fTemp) return false;
       if(fSource&&l.source!==fSource) return false;
@@ -1104,8 +1164,10 @@ function renderPipeline(){
       const isStale=daysIn>=staleLimit&&!['col-won','col-lost'].includes(stage);
       const isOverdue=l.nextAction&&l.nextAction<today&&!['col-won','col-lost'].includes(stage);
       const nextStage=STAGES[idx+1];
-      if(l.nextAction===today) todays.push(l.name);
+      if(l.nextAction===today && !l.muted && !l.deletedAt) todays.push(l.name);
       const cardStatus=leadCardStatus(l);
+      const ageClass=daysIn<7?'age-fresh':daysIn<21?'age-watch':'age-risk';
+      const activityScore=Math.min(100,((l.history||[]).length*8)+((entries.filter(e=>(e.linkedLeadIds||[]).includes(l.id)).length)*6)+(l.nextAction?10:0)-(isOverdue?20:0));
       const isPartial=cardStatus==='partial';
       const prodRows=(l.products||[]).map((p,pi)=>`
         <div class="product-row prod-${p.status}">
@@ -1121,19 +1183,20 @@ function renderPipeline(){
       let valDisplay=`₹${fmt(l.value)}`;
       if(stage==='col-won'&&l.actualValue){const v=l.value?Math.round(((l.actualValue-l.value)/l.value)*100):0;valDisplay=`₹${fmt(l.actualValue)} <span class="variance-badge ${v>=0?'variance-pos':'variance-neg'}">${v>=0?'+':''}${v}%</span>`;}
       const histHTML=(l.history||[]).slice(0,3).map(h=>`<div class="history-item"><span class="h-date">${h.date}:</span> ${escHtml(h.msg)}</div>`).join('');
-      return `<div class="lead-card ${l.temp}" draggable="true" id="${escHtml(l.id)}" data-lead-id="${escHtml(l.id)}" ondragstart="dragStart(event)" onclick="handleCardClick(event,'${escHtml(l.id)}')">
+      return `<div class="lead-card ${l.temp} ${ageClass}" draggable="true" id="${escHtml(l.id)}" data-lead-id="${escHtml(l.id)}" ondragstart="dragStart(event)" onclick="handleCardClick(event,'${escHtml(l.id)}')">
         ${isOverdue?'<div class="overdue-pulse"></div>':''}
         <div class="lead-card-top">
           <div>
             <div class="lead-name">${escHtml(l.name)}${isPartial?' <span class="partial-tag">PARTIAL</span>':''}</div>
-            <div class="lead-id">🆔 ${escHtml(l.id)}</div>
+            <div class="lead-id">🆔 ${escHtml(l.clientCode||l.id)}</div>
           </div>
           <div class="card-actions">
             <button class="icon-btn" onclick="event.stopPropagation();quickNote('${escHtml(l.id)}')" title="Note">💬</button>
             <button class="icon-btn" onclick="event.stopPropagation();openLeadModal('${escHtml(l.id)}')" title="Edit">✏️</button>
+            <button class="icon-btn" onclick="event.stopPropagation();toggleLeadMute('${escHtml(l.id)}')" title="Mute alerts">${l.muted?'🔕':'🔔'}</button>
           </div>
         </div>
-        <div class="lead-value">${valDisplay}</div>
+        <div class="lead-value">${valDisplay}</div><div style="font-size:.64rem;color:var(--text-muted);margin-bottom:4px;">Attention Index: ${activityScore}</div>
         <div>${prodRows}</div>
         <div class="tag-row">
           <span class="lead-tag source-tag">${escHtml(l.source)}</span>
@@ -1152,7 +1215,7 @@ function renderPipeline(){
           ${l.nextAction?`<br><span class="next-date ${isOverdue?'overdue':''}">📅 ${isOverdue?'OVERDUE':'Next'}: ${l.nextAction}</span>`:''}
         </div>
         <div class="card-footer">
-          <button class="btn-del" onclick="event.stopPropagation();deleteLead('${escHtml(l.id)}')">Delete</button>
+          ${l.deletedAt?`<button class="btn-del" onclick="event.stopPropagation();restoreLead('${escHtml(l.id)}')">Restore</button>`:`<button class="btn-del" onclick="event.stopPropagation();archiveLead('${escHtml(l.id)}')">Archive</button>`}
           ${nextStage?`<button class="btn-next" onclick="event.stopPropagation();updateLeadStage('${escHtml(l.id)}','${nextStage}')">Next ➔</button>`:''}
         </div>
         <div class="compact-hint">Tap for full details</div>
@@ -1247,6 +1310,23 @@ function updateDashboard(){
   set('trail-mf-annual','₹'+fmt(mfAnnual)); set('trail-ins-comm','₹'+fmt(insComm));
   set('trail-total','₹'+fmt(totalTrail));
   setProgress('aum',aumCur,aumTgt,'gold');setProgress('sip',sipCur,sipTgt,'teal');setProgress('trail',totalTrail,t.trailTarget||0,'');
+  const pm=$('pipeline-metrics');
+  if(pm){
+    const active=leads.filter(l=>!l.deletedAt && !['col-won','col-lost'].includes(l.stage));
+    const won=leads.filter(l=>!l.deletedAt && l.stage==='col-won');
+    const lost=leads.filter(l=>!l.deletedAt && l.stage==='col-lost');
+    const all=active.length+won.length+lost.length;
+    const conversion=all?Math.round((won.length/all)*100):0;
+    const avgClose=won.length?Math.round(won.reduce((s,l)=>s+daysSince(l.createdAt),0)/won.length):0;
+    const inflow30=leads.filter(l=>!l.deletedAt && daysSince(l.createdAt)<=30).length;
+    const bySource={};
+    leads.filter(l=>!l.deletedAt).forEach(l=>{bySource[l.source]=bySource[l.source]||{t:0,w:0};bySource[l.source].t++;if(l.stage==='col-won')bySource[l.source].w++;});
+    const topSrc=Object.entries(bySource).sort((a,b)=>(b[1].w/(b[1].t||1))-(a[1].w/(a[1].t||1)))[0];
+    pm.innerHTML=`<div class="lf-stat"><div class="ls-label">Conversion</div><div class="ls-val">${conversion}%</div></div>
+      <div class="lf-stat"><div class="ls-label">Avg Time to Close</div><div class="ls-val">${avgClose}d</div></div>
+      <div class="lf-stat"><div class="ls-label">Lead Inflow (30d)</div><div class="ls-val">${inflow30}</div></div>
+      <div class="lf-stat"><div class="ls-label">Best Source</div><div class="ls-val">${topSrc?escHtml(topSrc[0]):'—'}</div><div class="ls-sub">Win rate ${topSrc?Math.round((topSrc[1].w/topSrc[1].t)*100):0}%</div></div>`;
+  }
   renderSipLogWidget();
 }
 
@@ -1290,7 +1370,7 @@ function renderSipLogFull(){
 function addSipLogEntry(){
   const date=$('sl-date').value;const client=sanitize($('sl-client').value);const type=$('sl-type').value;const amount=parseFloat($('sl-amount').value)||0;const note=sanitize($('sl-note').value);
   if(!date||!amount){alert('Please enter date and amount.');return;}
-  sipLog.push({id:Date.now(),date,client,type,amount,note});
+  sipLog.push({id:genId(),date,client,type,amount,note});
   $('sl-client').value='';$('sl-amount').value='';$('sl-note').value='';
   saveAll();renderSipLogFull();renderSipLogWidget();updateDashboard();updateInsights();
 }
@@ -1572,6 +1652,7 @@ function renderClientsTab(){
 /* ══ SETTINGS ══ */
 function renderSettings(){
   const ts=$('targets-summary');
+  const dm=$('darkModeToggle'); if(dm) dm.checked=!!prefs.darkMode;
   if(ts) ts.innerHTML=targets.name?`<strong>${escHtml(targets.name)}</strong> · AUM: ₹${fmtCr(targets.aumCurrent||0)} (Target: ₹${fmtCr(targets.aumTarget||0)}) · SIP: ₹${fmt(targets.sipCurrent||0)}/mo`:'No targets set yet.';
   const al=$('audit-log-display');
   if(al) al.innerHTML=auditLog.slice(0,20).map(a=>`<div class="audit-item">${new Date(a.ts).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})} — ${escHtml(a.msg)}</div>`).join('')||'<div class="audit-item" style="color:var(--text-dim);">No audit events yet.</div>';
@@ -1579,7 +1660,12 @@ function renderSettings(){
   if(si){
     let total=0;
     [PS_KEY,LF_KEY,TGT_KEY,SIP_KEY,GOALS_KEY,REVIEWS_KEY,PREF_KEY].forEach(k=>{const v=localStorage.getItem(k)||'';total+=v.length;});
-    si.innerHTML=`Entries: ${entries.length} · Leads: ${leads.length} · SIP Entries: ${sipLog.length} · Goals: ${goals.length} · Reviews: ${reviews.length}<br>Approx storage used: ${(total/1024).toFixed(1)} KB`;
+    si.innerHTML=`Entries: ${entries.length} · Leads: ${leads.filter(l=>!l.deletedAt).length} (Archived: ${leads.filter(l=>l.deletedAt).length}) · SIP Entries: ${sipLog.length} · Goals: ${goals.length} · Reviews: ${reviews.length}<br>Approx storage used: ${(total/1024).toFixed(1)} KB`;
+  }
+  const ar=$('archived-leads');
+  if(ar){
+    const archived=leads.filter(l=>l.deletedAt);
+    ar.innerHTML=archived.length?archived.map(l=>`<div class="audit-item">${escHtml(l.name)} · ${escHtml(l.clientCode||l.id)} <button class="portfolio-btn" onclick="restoreLead('${escHtml(l.id)}')" style="margin-left:8px;font-size:.66rem;">Restore</button></div>`).join(''):'No archived leads.';
   }
 }
 
@@ -1641,6 +1727,7 @@ function renderAll(){
 /* ══ INIT ══ */
 function init(){
   loadAll();
+  applyTheme();
   const rd=$('review-date'); if(rd) rd.value=todayISO();
   renderAll();
   // Also pre-render LeadFlow so data is ready when user navigates there
