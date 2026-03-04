@@ -62,6 +62,7 @@ const $ = id => document.getElementById(id);
 function fmt(n){return Number(n||0).toLocaleString('en-IN');}
 function fmtCr(n){if(!n)return'0';if(n>=1e7)return(n/1e7).toFixed(2)+' Cr';if(n>=1e5)return(n/1e5).toFixed(2)+' L';return fmt(n);}
 function fmtDate(ts){return new Date(ts).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});}
+function fmtDateTime(ts){return new Date(ts).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});}
 function daysSince(ts){return Math.floor((Date.now()-(ts||Date.now()))/86400000);}
 function daysLeft(d){return Math.max(0,Math.ceil((d-Date.now())/86400000));}
 function todayISO(){return new Date().toISOString().split('T')[0];}
@@ -572,14 +573,14 @@ function renderEntries(){
           ${e.priority?`<span class="priority-tag ${e.priority}" style="margin-left:5px;">${e.priority}</span>`:''}
           ${e.reminder?`<span style="font-size:.65rem;color:var(--accent-amber);margin-left:5px;">🔔 ${new Date(e.reminder).toLocaleString('en-IN',{month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>`:''}
         </div>
-        <div class="entry-meta"><span class="energy-dot mood-${e.energy}"></span>${e.dateShort}</div>
+        <div class="entry-meta"><span class="energy-dot mood-${e.energy}"></span>${e.dateShort}${e.updatedAt?` · edited ${fmtDateTime(e.updatedAt)}`:''}</div>
       </div>
       <div class="entry-body">${escHtml(e.text.slice(0,400))}${e.text.length>400?'…':''}</div>
       ${linkedBadges?`<div style="margin-top:5px;">${linkedBadges}</div>`:''}
       <div class="entry-actions">
-        <button onclick="editEntry('${escHtml(e.id)}')">✏️ Edit</button>
-        ${e.type==='Task'?`<button onclick="toggleDone('${escHtml(e.id)}')">${e.done?'↩️ Reopen':'✅ Done'}</button>`:''}
-        <button onclick="deleteEntry('${escHtml(e.id)}')">🗑 Delete</button>
+        <button type="button" data-entry-action="edit" data-entry-id="${escHtml(e.id)}">✏️ Edit</button>
+        ${e.type==='Task'?`<button type="button" data-entry-action="toggle" data-entry-id="${escHtml(e.id)}">${e.done?'↩️ Reopen':'✅ Done'}</button>`:''}
+        <button type="button" data-entry-action="delete" data-entry-id="${escHtml(e.id)}">🗑 Delete</button>
       </div>
     </div>`;
   }).join('');
@@ -640,13 +641,13 @@ function renderTasks(){
     <div class="entry-card ${t.done?'task-done':''}" style="margin-bottom:6px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;">
         <div style="display:flex;gap:8px;align-items:flex-start;flex:1;">
-          <input type="checkbox" ${t.done?'checked':''} onchange="toggleDone('${escHtml(t.id)}')" style="margin-top:3px;accent-color:var(--primary);">
+          <input type="checkbox" ${t.done?'checked':''} data-task-action="toggle" data-task-id="${escHtml(t.id)}" style="margin-top:3px;accent-color:var(--primary);">
           <div>
             <div style="font-size:.82rem;">${escHtml(t.text.slice(0,200))}</div>
             <div style="font-size:.65rem;color:var(--text-muted);margin-top:3px;">${t.dateShort} · <span class="priority-tag ${t.priority}">${t.priority}</span></div>
           </div>
         </div>
-        <div style="display:flex;gap:4px;"><button onclick="editEntry('${escHtml(t.id)}');switchTab('log')" style="background:none;border:none;color:var(--text-dim);cursor:pointer;">✏️</button><button onclick="deleteEntry('${escHtml(t.id)}')" style="background:none;border:none;color:var(--text-dim);cursor:pointer;">🗑</button></div>
+        <div style="display:flex;gap:4px;"><button type="button" data-task-action="edit" data-task-id="${escHtml(t.id)}" style="background:none;border:none;color:var(--text-dim);cursor:pointer;">✏️</button><button type="button" data-task-action="delete" data-task-id="${escHtml(t.id)}" style="background:none;border:none;color:var(--text-dim);cursor:pointer;">🗑</button></div>
       </div>
     </div>`).join('');
 }
@@ -1794,6 +1795,33 @@ function init(){
 document.addEventListener('click',e=>{
   const btn=e.target.closest('#tag-suggest .tag-chip');
   if(btn) insertTag(btn.dataset.tag||'');
+});
+
+
+// Delegate entry list actions (robust for string/legacy IDs)
+document.addEventListener('click',e=>{
+  const btn=e.target.closest('[data-entry-action]');
+  if(!btn) return;
+  const id=btn.dataset.entryId||'';
+  const action=btn.dataset.entryAction;
+  if(action==='edit') editEntry(id);
+  if(action==='delete') deleteEntry(id);
+  if(action==='toggle') toggleDone(id);
+});
+
+// Delegate task list actions
+document.addEventListener('click',e=>{
+  const btn=e.target.closest('[data-task-action]');
+  if(!btn) return;
+  const id=btn.dataset.taskId||'';
+  const action=btn.dataset.taskAction;
+  if(action==='edit'){ editEntry(id); switchTab('log'); }
+  if(action==='delete') deleteEntry(id);
+});
+document.addEventListener('change',e=>{
+  const cb=e.target.closest('input[data-task-action="toggle"]');
+  if(!cb) return;
+  toggleDone(cb.dataset.taskId||'');
 });
 
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init,{once:true});
