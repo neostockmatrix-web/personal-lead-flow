@@ -483,7 +483,7 @@ function saveEntry(){
   const now=Date.now();
 
   if(editingEntryId){
-    entries=entries.map(e=>e.id===editingEntryId?{
+    entries=entries.map(e=>String(e.id)===String(editingEntryId)?{
       ...e,
       text,type,priority,reminder,energy:currentMood,tags:clientTags,linkedLeadId:linkedLeadIds[0]||'',linkedLeadIds,linkedTaskId:e.linkedTaskId||null,sourceType:e.sourceType||'manual-log',
       done:e.done,
@@ -530,7 +530,7 @@ function saveEntry(){
 }
 
 function editEntry(id){
-  const e=entries.find(x=>x.id===id); if(!e) return;
+  const e=entries.find(x=>String(x.id)===String(id)); if(!e) return;
   editingEntryId=id;
   $('content').value=e.text||'';
   $('type').value=e.type||'Note';
