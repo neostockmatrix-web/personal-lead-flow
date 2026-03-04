@@ -129,6 +129,9 @@
         <span id="taskExtras" style="display:none;">
           <select id="priority"><option value="Low">🟢 Low</option><option value="Medium">🟡 Medium</option><option value="High">🔴 High</option></select>
         </span>
+        <select id="logClientLink" title="Link this log to a client" style="min-width:190px;">
+          <option value="">Link client (optional)</option>
+        </select>
         <input type="datetime-local" id="reminder" title="Set reminder">
         <button class="btn-primary" onclick="saveEntry()" id="saveBtn">Save Entry</button>
         <button onclick="resetForm()" style="color:#64748b;background:none;border:none;padding:7px 10px;">Clear</button>

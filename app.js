@@ -45,6 +45,7 @@ let personalChart     = null;
 let trendChart        = null;
 let autoBackupTimer   = null;
 let prefs             = { backupEnabled:false, backupIntervalMin:15, backupFolderConnected:false, lastBackupAt:null };
+let editingEntryId    = null;
 
 /* ══ CONSTANTS ══ */
 const STAGES = ['col-prospect','col-contacted','col-proposal','col-potential','col-won','col-lost'];
@@ -67,6 +68,32 @@ function isValidEmail(v){return !v||/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);}
 function isValidPhone(v){return !v||/^[0-9]{10,15}$/.test(v.replace(/\D/g,''));}
 function safeId(v){return String(v||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')||'client';}
 function getStaleDays(){return{'col-prospect':parseInt(targets.staleProspect)||5,'col-contacted':parseInt(targets.staleContacted)||7,'col-proposal':parseInt(targets.staleProposal)||10,'col-potential':parseInt(targets.stalePotential)||21};}
+
+function normKey(v){return String(v||'').toLowerCase().replace(/[^a-z0-9]/g,'');}
+function extractClientTags(text){return [...new Set((String(text||'').match(/#([A-Za-z][A-Za-z0-9_-]*)/g)||[]).map(t=>t.slice(1)))];}
+function resolveLinkedLeadIds(text,selectedLeadId=''){
+  const tags=extractClientTags(text);
+  const ids=[];
+  const addId=id=>{if(id&&!ids.includes(id)) ids.push(id);};
+  tags.forEach(tag=>{
+    const nk=normKey(tag);
+    const match=leads.find(l=>normKey(l.name)===nk || normKey(l.id)===nk);
+    if(match) addId(match.id);
+  });
+  if(selectedLeadId) addId(selectedLeadId);
+  return {tags,ids};
+}
+
+function updateLogClientOptions(){
+  const sel=$('logClientLink'); if(!sel) return;
+  const prev=sel.value;
+  const opts=['<option value="">Link client (optional)</option>'];
+  [...leads].sort((a,b)=>String(a.name).localeCompare(String(b.name))).forEach(l=>{
+    opts.push(`<option value="${escHtml(l.id)}">${escHtml(l.name)} · ${escHtml(l.id)}</option>`);
+  });
+  sel.innerHTML=opts.join('');
+  if(prev && [...sel.options].some(o=>o.value===prev)) sel.value=prev;
+}
 
 function addAudit(msg){
   auditLog.unshift({ts:Date.now(),msg});
@@ -363,7 +390,14 @@ function insertTag(tag){
 }
 
 function toggleTaskUI(){$('taskExtras').style.display=$('type').value==='Task'?'inline-flex':'none';}
-function resetForm(){$('content').value='';$('reminder').value='';selectMood(3);$('type').value='Note';toggleTaskUI();$('editor-meta').textContent='0 words';const ll=$('log-lead-links');if(ll)ll.innerHTML='';}
+function resetForm(){
+  editingEntryId=null;
+  $('content').value='';$('reminder').value='';selectMood(3);$('type').value='Note';
+  if($('logClientLink')) $('logClientLink').value='';
+  toggleTaskUI();$('editor-meta').textContent='0 words';
+  const ll=$('log-lead-links');if(ll)ll.innerHTML='';
+  const sb=$('saveBtn'); if(sb) sb.textContent='Save Entry';
+}
 
 function insertTemplate(){$('content').value='## Reflection\n**What went well:**\n\n**What could improve:**\n\n**Key insight:**\n';}
 function insertWin(){$('content').value+='🏆 WIN: ';}
@@ -371,8 +405,10 @@ function insertHabit(){$('content').value+='🔄 HABIT: ';}
 function insertNote(){$('content').value+='💡 INSIGHT: ';}
 function insertMorning(){$('content').value='☀️ Morning Intention:\n**Focus today:**\n**Energy intention:**\n**Top 3 tasks:**\n1. \n2. \n3. \n';}
 function insertClient(){
-  const name=leads.length?leads[0].name:'ClientName';
+  const lead=leads[0]||null;
+  const name=lead?lead.name:'ClientName';
   $('content').value+=`👤 CLIENT LOG #${name.replace(/\s/g,'')}: `;
+  if($('logClientLink')&&lead) $('logClientLink').value=lead.id;
   $('type').value='Note';
   renderLogLeadLinks($('content').value);
 }
@@ -384,41 +420,74 @@ function saveEntry(){
   const type=$('type').value;
   const priority=type==='Task'?$('priority').value:null;
   const reminder=$('reminder').value||null;
-  // Extract all tags (includes client names)
-  const clientTags=[...new Set((text.match(/#([A-Za-z][A-Za-z0-9_]*)/g)||[]).map(t=>t.slice(1)))];
-  // Find any linked lead IDs for cross-reference
-  const linkedLeadIds=clientTags.reduce((acc,tag)=>{
-    const match=leads.find(l=>l.name.toLowerCase()===tag.toLowerCase());
-    if(match&&!acc.includes(match.id)) acc.push(match.id);
-    return acc;
-  },[]);
-  const entry={
-    id:Date.now(),text,type,priority,reminder,
-    energy:currentMood,done:false,
-    tags:clientTags,
-    linkedLeadIds, // ← cross-reference to LeadFlow
-    date:new Date().toISOString(),
-    dateShort:fmtDate(Date.now())
-  };
-  entries.unshift(entry);
-  // Also add a history note to linked leads
-  if(linkedLeadIds.length){
-    const snippet=text.slice(0,120).replace(/\n/g,' ');
-    leads=leads.map(l=>{
-      if(!linkedLeadIds.includes(l.id)) return l;
-      const hist=[...(l.history||[])];
-      hist.unshift({date:fmtDate(Date.now()),msg:`📝 Log: ${snippet}`});
-      return {...l,history:hist,lastUpdated:Date.now()};
-    });
+  const selectedLeadId=$('logClientLink')?.value||'';
+  const {tags:clientTags,ids:linkedLeadIds}=resolveLinkedLeadIds(text,selectedLeadId);
+  const now=Date.now();
+
+  if(editingEntryId){
+    entries=entries.map(e=>e.id===editingEntryId?{
+      ...e,
+      text,type,priority,reminder,energy:currentMood,tags:clientTags,linkedLeadIds,
+      done:type==='Task'?e.done:false,
+      updatedAt:new Date().toISOString()
+    }:e);
+    if(linkedLeadIds.length){
+      const snippet=text.slice(0,120).replace(/\n/g,' ');
+      leads=leads.map(l=>{
+        if(!linkedLeadIds.includes(l.id)) return l;
+        const hist=[...(l.history||[])];
+        hist.unshift({date:fmtDate(now),msg:`✏️ Log updated: ${snippet}`});
+        return {...l,history:hist,lastUpdated:now};
+      });
+    }
+    addAudit(`Log entry updated (${type})${linkedLeadIds.length?' — linked: '+linkedLeadIds.join(', '):''}`);
+  } else {
+    const entry={
+      id:now,text,type,priority,reminder,
+      energy:currentMood,done:false,
+      tags:clientTags,
+      linkedLeadIds,
+      date:new Date().toISOString(),
+      dateShort:fmtDate(now)
+    };
+    entries.unshift(entry);
+    if(linkedLeadIds.length){
+      const snippet=text.slice(0,120).replace(/\n/g,' ');
+      leads=leads.map(l=>{
+        if(!linkedLeadIds.includes(l.id)) return l;
+        const hist=[...(l.history||[])];
+        hist.unshift({date:fmtDate(now),msg:`📝 Log: ${snippet}`});
+        return {...l,history:hist,lastUpdated:now};
+      });
+    }
+    addAudit(`Log entry saved (${type})${linkedLeadIds.length?' — linked: '+linkedLeadIds.join(', '):''}`);
   }
+
   saveAll();
   renderEntries();
+  renderTasks();
+  renderHabits();
   renderStatsPanel();
   updatePriorityIntel();
   updateReminders();
   renderBiKpis();
   resetForm();
-  addAudit(`Log entry saved (${type})${linkedLeadIds.length?' — linked: '+linkedLeadIds.join(', '):''}`);
+}
+
+function editEntry(id){
+  const e=entries.find(x=>x.id===id); if(!e) return;
+  editingEntryId=id;
+  $('content').value=e.text||'';
+  $('type').value=e.type||'Note';
+  toggleTaskUI();
+  if($('priority')) $('priority').value=e.priority||'Low';
+  $('reminder').value=e.reminder||'';
+  selectMood(e.energy||3);
+  if($('logClientLink')) $('logClientLink').value=(e.linkedLeadIds||[])[0]||'';
+  const sb=$('saveBtn'); if(sb) sb.textContent='Update Entry';
+  updateEditorMeta({target:$('content')});
+  $('content').focus();
+  $('content').setSelectionRange($('content').value.length,$('content').value.length);
 }
 
 /* ══ RENDER ENTRIES ══ */
@@ -450,6 +519,7 @@ function renderEntries(){
       <div class="entry-body">${escHtml(e.text.slice(0,400))}${e.text.length>400?'…':''}</div>
       ${linkedBadges?`<div style="margin-top:5px;">${linkedBadges}</div>`:''}
       <div class="entry-actions">
+        <button onclick="editEntry(${e.id})">✏️ Edit</button>
         ${e.type==='Task'?`<button onclick="toggleDone(${e.id})">${e.done?'↩️ Reopen':'✅ Done'}</button>`:''}
         <button onclick="deleteEntry(${e.id})">🗑 Delete</button>
       </div>
@@ -480,7 +550,7 @@ function renderTasks(){
             <div style="font-size:.65rem;color:var(--text-muted);margin-top:3px;">${t.dateShort} · <span class="priority-tag ${t.priority}">${t.priority}</span></div>
           </div>
         </div>
-        <button onclick="deleteEntry(${t.id})" style="background:none;border:none;color:var(--text-dim);cursor:pointer;">🗑</button>
+        <div style="display:flex;gap:4px;"><button onclick="editEntry(${t.id});switchTab('log')" style="background:none;border:none;color:var(--text-dim);cursor:pointer;">✏️</button><button onclick="deleteEntry(${t.id})" style="background:none;border:none;color:var(--text-dim);cursor:pointer;">🗑</button></div>
       </div>
     </div>`).join('');
 }
@@ -774,6 +844,7 @@ function renderLeadFlow(){
   if(name==='lf-referrals') renderReferralTree();
   if(name==='lf-insights')  updateInsights();
   if(name==='lf-analytics') updateStats();
+  updateLogClientOptions();
   // Always default to pipeline if nothing is active
   if(!activeLFPane.classList.contains('active')) renderPipeline();
 }
@@ -842,6 +913,7 @@ function openLeadModal(editId=null){
   document.querySelectorAll('#productCheckboxes input[type=checkbox]').forEach(cb=>{cb.checked=false;cb.closest('.product-check-item')?.classList.remove('selected');});
   const names=[...new Set(leads.map(l=>l.name))].filter(Boolean);
   $('clientNamesList').innerHTML=names.map(n=>`<option value="${escHtml(n)}">`).join('');
+  updateLogClientOptions();
   $('clientIdDisplay').textContent=editId?'Existing':'Auto on Save';
   if(editId){
     const l=leads.find(x=>x.id===editId); if(!l) return;
@@ -1559,6 +1631,7 @@ function renderAll(){
   renderBiKpis();
   updateStrategicInsight();
   renderGoalDisplay();
+  updateLogClientOptions();
   renderSettings();
   // Only render the active LeadFlow sub-tab to avoid hidden canvas issues
   const lfTabActive=document.querySelector('#tab-leadflow.active');
