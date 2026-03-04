@@ -46,6 +46,9 @@ let trendChart        = null;
 let autoBackupTimer   = null;
 let prefs             = { backupEnabled:false, backupIntervalMin:15, backupFolderConnected:false, lastBackupAt:null, darkMode:false, cloudSyncEnabled:false, cloudSyncUrl:'', lastCloudSyncAt:null };
 let editingEntryId    = null;
+let entryLimit        = 60;
+let lastDeletedEntry  = null;
+let lastDeletedTimer  = null;
 
 /* ══ CONSTANTS ══ */
 const STAGES = ['col-prospect','col-contacted','col-proposal','col-potential','col-won','col-lost'];
@@ -259,15 +262,17 @@ function updateBackupUI(msg){
   const cse=$('cloudSyncEnabled'); if(cse) cse.checked=!!prefs.cloudSyncEnabled;
   const csu=$('cloudSyncUrl'); if(csu) csu.value=prefs.cloudSyncUrl||'';
   if(!status) return;
-  if(msg){status.textContent=msg;return;}
+  const dot=$('backupDot');
+  if(msg){status.textContent=msg;if(dot)dot.textContent='🟡';return;}
   const connected=window.__kkBackupDirHandle||prefs.backupFolderConnected;
   const last=prefs.lastBackupAt?new Date(prefs.lastBackupAt).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'Never';
   status.textContent=`Status: ${connected?'Folder connected':'No folder connected'} · Last backup: ${last}`;
-  const bh=$('backup-health'); if(bh){
-    const stale=prefs.lastBackupAt?daysSince(prefs.lastBackupAt):999;
-    const cloud=prefs.lastCloudSyncAt?`Cloud: ${new Date(prefs.lastCloudSyncAt).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}`:'Cloud: never';
-    bh.textContent=`Backup health: ${stale<=1?'🟢 Healthy':stale<=7?'🟡 Delayed':'🔴 Stale'} · ${cloud}`;
-  }
+  const bh=$('backup-health');
+  const stale=prefs.lastBackupAt?daysSince(prefs.lastBackupAt):999;
+  const cloud=prefs.lastCloudSyncAt?`Cloud: ${new Date(prefs.lastCloudSyncAt).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}`:'Cloud: never';
+  const healthIcon=stale<=1?'🟢':stale<=7?'🟡':'🔴';
+  if(bh) bh.textContent=`Backup health: ${stale<=1?'🟢 Healthy':stale<=7?'🟡 Delayed':'🔴 Stale'} · ${cloud}`;
+  if(dot) dot.textContent=connected?healthIcon:'🔴';
 }
 
 /* ══ EXPORT / IMPORT ══ */
@@ -449,6 +454,7 @@ function resetForm(){
   toggleTaskUI();$('editor-meta').textContent='0 words';
   const ll=$('log-lead-links');if(ll)ll.innerHTML='';
   const sb=$('saveBtn'); if(sb) sb.textContent='Save Entry';
+  const es=$('editor-status'); if(es) es.textContent='';
 }
 
 function insertTemplate(){$('content').value='## Reflection\n**What went well:**\n\n**What could improve:**\n\n**Key insight:**\n';}
@@ -480,7 +486,7 @@ function saveEntry(){
     entries=entries.map(e=>e.id===editingEntryId?{
       ...e,
       text,type,priority,reminder,energy:currentMood,tags:clientTags,linkedLeadId:linkedLeadIds[0]||'',linkedLeadIds,linkedTaskId:e.linkedTaskId||null,sourceType:e.sourceType||'manual-log',
-      done:type==='Task'?e.done:false,
+      done:e.done,
       updatedAt:new Date().toISOString()
     }:e);
     if(linkedLeadIds.length){
@@ -519,13 +525,7 @@ function saveEntry(){
   }
 
   saveAll();
-  renderEntries();
-  renderTasks();
-  renderHabits();
-  renderStatsPanel();
-  updatePriorityIntel();
-  updateReminders();
-  renderBiKpis();
+  refreshAfterEntryChange();
   resetForm();
 }
 
@@ -540,6 +540,8 @@ function editEntry(id){
   selectMood(e.energy||3);
   if($('logClientLink')) $('logClientLink').value=(e.linkedLeadIds||[])[0]||'';
   const sb=$('saveBtn'); if(sb) sb.textContent='Update Entry';
+  const es=$('editor-status'); if(es) es.textContent='✏️ Editing entry — Save to update';
+  window.scrollTo({top:0,behavior:'smooth'});
   updateEditorMeta({target:$('content')});
   $('content').focus();
   $('content').setSelectionRange($('content').value.length,$('content').value.length);
@@ -555,8 +557,9 @@ function renderEntries(){
     if(search&&!e.text.toLowerCase().includes(search)) return false;
     return true;
   });
-  if(!filtered.length){list.innerHTML='<div style="text-align:center;padding:30px;color:var(--text-dim);">No entries yet. Start logging above ↑</div>';return;}
-  list.innerHTML=filtered.slice(0,60).map(e=>{
+  if(!filtered.length){list.innerHTML='<div style="text-align:center;padding:30px;color:var(--text-dim);">No entries yet. Start logging above ↑</div>';const lmb=$('load-more-entries');if(lmb)lmb.style.display='none';return;}
+  const visible=filtered.slice(0,entryLimit);
+  list.innerHTML=visible.map(e=>{
     // Build linked lead badges for entries that have linked leads
     const linkedBadges=(e.linkedLeadIds||[]).map(lid=>{
       const lead=leads.find(l=>l.id===lid);
@@ -574,16 +577,54 @@ function renderEntries(){
       <div class="entry-body">${escHtml(e.text.slice(0,400))}${e.text.length>400?'…':''}</div>
       ${linkedBadges?`<div style="margin-top:5px;">${linkedBadges}</div>`:''}
       <div class="entry-actions">
-        <button onclick="editEntry(${e.id})">✏️ Edit</button>
-        ${e.type==='Task'?`<button onclick="toggleDone(${e.id})">${e.done?'↩️ Reopen':'✅ Done'}</button>`:''}
-        <button onclick="deleteEntry(${e.id})">🗑 Delete</button>
+        <button onclick="editEntry('${escHtml(e.id)}')">✏️ Edit</button>
+        ${e.type==='Task'?`<button onclick="toggleDone('${escHtml(e.id)}')">${e.done?'↩️ Reopen':'✅ Done'}</button>`:''}
+        <button onclick="deleteEntry('${escHtml(e.id)}')">🗑 Delete</button>
       </div>
     </div>`;
   }).join('');
+  const lmb=$('load-more-entries');
+  if(lmb) lmb.style.display=filtered.length>entryLimit?'':'none';
 }
 
-function toggleDone(id){entries=entries.map(e=>e.id===id?{...e,done:!e.done}:e);saveAll();renderEntries();renderStatsPanel();}
-function deleteEntry(id){if(!confirm('Delete this entry?'))return;entries=entries.filter(e=>e.id!==id);saveAll();renderEntries();renderStatsPanel();updatePriorityIntel();}
+
+function loadMoreEntries(){entryLimit+=60;renderEntries();}
+
+function activeMainTab(){
+  return document.querySelector('#main-tab-nav .tab-btn.active')?.getAttribute('onclick')?.match(/'([^']+)'/)?.[1]||'log';
+}
+function refreshAfterEntryChange(){
+  const tab=activeMainTab();
+  if(tab==='log') renderEntries();
+  if(tab==='tasks') renderTasks();
+  if(tab==='habits') renderHabits();
+  renderStatsPanel();
+  updatePriorityIntel();
+  updateReminders();
+  renderBiKpis();
+}
+
+function toggleDone(id){entries=entries.map(e=>String(e.id)===String(id)?{...e,done:!e.done}:e);saveAll();refreshAfterEntryChange();}
+function deleteEntry(id){
+  const idx=entries.findIndex(e=>String(e.id)===String(id));
+  if(idx<0) return;
+  const removed=entries[idx];
+  entries.splice(idx,1);
+  lastDeletedEntry={entry:removed,index:idx,expiresAt:Date.now()+5000};
+  if(lastDeletedTimer) clearTimeout(lastDeletedTimer);
+  lastDeletedTimer=setTimeout(()=>{lastDeletedEntry=null;const es=$('editor-status');if(es&&es.textContent.includes('Undo'))es.textContent='';},5000);
+  saveAll();refreshAfterEntryChange();
+  const es=$('editor-status');
+  if(es) es.innerHTML='🗑 Entry deleted. <button type="button" onclick="undoDeleteEntry()" style="margin-left:6px;padding:2px 7px;border:1px solid var(--border);border-radius:4px;background:var(--surface2);color:var(--text);">Undo</button>';
+}
+function undoDeleteEntry(){
+  if(!lastDeletedEntry) return;
+  entries.splice(Math.min(lastDeletedEntry.index,entries.length),0,lastDeletedEntry.entry);
+  lastDeletedEntry=null;
+  if(lastDeletedTimer) clearTimeout(lastDeletedTimer);
+  const es=$('editor-status'); if(es) es.textContent='↩️ Delete undone.';
+  saveAll();refreshAfterEntryChange();
+}
 
 /* ══ TASKS ══ */
 function renderTasks(){
@@ -599,13 +640,13 @@ function renderTasks(){
     <div class="entry-card ${t.done?'task-done':''}" style="margin-bottom:6px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;">
         <div style="display:flex;gap:8px;align-items:flex-start;flex:1;">
-          <input type="checkbox" ${t.done?'checked':''} onchange="toggleDone(${t.id})" style="margin-top:3px;accent-color:var(--primary);">
+          <input type="checkbox" ${t.done?'checked':''} onchange="toggleDone('${escHtml(t.id)}')" style="margin-top:3px;accent-color:var(--primary);">
           <div>
             <div style="font-size:.82rem;">${escHtml(t.text.slice(0,200))}</div>
             <div style="font-size:.65rem;color:var(--text-muted);margin-top:3px;">${t.dateShort} · <span class="priority-tag ${t.priority}">${t.priority}</span></div>
           </div>
         </div>
-        <div style="display:flex;gap:4px;"><button onclick="editEntry(${t.id});switchTab('log')" style="background:none;border:none;color:var(--text-dim);cursor:pointer;">✏️</button><button onclick="deleteEntry(${t.id})" style="background:none;border:none;color:var(--text-dim);cursor:pointer;">🗑</button></div>
+        <div style="display:flex;gap:4px;"><button onclick="editEntry('${escHtml(t.id)}');switchTab('log')" style="background:none;border:none;color:var(--text-dim);cursor:pointer;">✏️</button><button onclick="deleteEntry('${escHtml(t.id)}')" style="background:none;border:none;color:var(--text-dim);cursor:pointer;">🗑</button></div>
       </div>
     </div>`).join('');
 }
@@ -629,11 +670,13 @@ function renderHabits(){
 }
 
 function countStreak(habitEntries,name){
+  const hasToday=habitEntries.some(e=>e.text.includes(name)&&e.date?.startsWith(todayISO()));
   let streak=0,d=new Date();
+  if(!hasToday) d.setDate(d.getDate()-1);
   for(let i=0;i<30;i++){
     const ds=d.toISOString().split('T')[0];
     if(habitEntries.some(e=>e.text.includes(name)&&e.date?.startsWith(ds))) streak++;
-    else if(i>0) break;
+    else break;
     d.setDate(d.getDate()-1);
   }
   return streak;
@@ -1008,6 +1051,8 @@ function submitLeadForm(){
   if(!name){alert('Client name is required.');return;}
   if(!isValidPhone(phone)){alert('Enter a valid phone number (10-15 digits).');return;}
   if(!isValidEmail(email)){alert('Enter a valid email address.');return;}
+  const duplicate=leads.find(l=>l.id!==id && ((phone&&l.phone===phone)||(email&&l.email&&l.email.toLowerCase()===email.toLowerCase())) && !l.deletedAt);
+  if(duplicate&&!confirm(`Possible duplicate found: ${duplicate.name} (${duplicate.clientCode||duplicate.id}). Continue?`)) return;
   const nextAction=$('nextAction').value;
   const data={name,phone,email,referredBy,products:prods,value:totalValue(prods),revType:$('revType').value,source:$('source').value,temp:$('temp').value,nextAction,followUpStatus:nextAction?(nextAction<todayISO()?'overdue':'scheduled'):'none',nextFollowUpDate:nextAction||'',actualValue:parseFloat($('actualValue')?.value)||0,lossReason:$('lossReason')?.value||'',lastUpdated:Date.now()};
   if(id){
@@ -1514,6 +1559,7 @@ function renderPortfolio(){
   }).join('');
 }
 
+
 function renderPortfolioFiltered(){renderPortfolio();}
 
 /* ══ CLIENT DETAIL ══ */
@@ -1612,6 +1658,7 @@ function renderReferralTree(){
     return `<div style="padding:10px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);margin-bottom:8px;"><div class="ref-node-name">🌟 ${escHtml(r.name)} ${rootBadge}</div><div class="ref-node-meta">Referred ${r.children.length} client${r.children.length!==1?'s':''} · ₹${fmt(r.children.reduce((s,c)=>s+c.value,0))} pipeline</div><div class="ref-children">${childRows}</div></div>`;
   }).join('');
 }
+
 
 /* ══ CLIENTS TAB ══ */
 function renderClientsTab(){

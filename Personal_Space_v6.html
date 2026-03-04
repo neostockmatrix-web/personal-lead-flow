@@ -17,6 +17,7 @@
       <p class="muted">Personal OS · Lead Pipeline · Client Intelligence — All in one</p>
     </div>
     <div class="header-actions">
+      <span id="backupDot" title="Backup health" style="font-size:.8rem;">⚪</span>
       <span id="lastSyncTime" style="font-size:.68rem;color:var(--text-dim);"></span>
       <button onclick="exportUnifiedJSON()">📤 Export</button>
       <button onclick="document.getElementById('importFileUnified').click()">📥 Import</button>
@@ -120,6 +121,7 @@
       </div>
       <!-- Log → Lead Link display -->
       <div id="log-lead-links" style="margin-top:6px;min-height:20px;"></div>
+      <div id="editor-status" style="font-size:.72rem;color:var(--text-dim);min-height:18px;margin-top:4px;"></div>
       <div class="controls">
         <select id="type" onchange="toggleTaskUI()">
           <option value="Note">Note 📝</option>
@@ -144,6 +146,7 @@
       </select>
     </div>
     <div class="entries-list" id="entries-list"></div>
+    <div style="margin-top:8px;"><button id="load-more-entries" onclick="loadMoreEntries()" style="display:none;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);">Load more</button></div>
   </div>
 
   <!-- ══════════════════════════════════ -->
