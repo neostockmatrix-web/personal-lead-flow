@@ -20,6 +20,7 @@ const SIP_KEY     = 'kk_siplog_v8';
 const GOALS_KEY   = 'kk_goals_v8';
 const REVIEWS_KEY = 'kk_reviews_v8';
 const AUDIT_KEY   = 'kk_audit_v8';
+const PREF_KEY    = 'kk_prefs_v1';
 
 /* Legacy key migration */
 const LEGACY_LF  = ['kk_leads','kk_leads_v2','kk_leadflow','kk_leadflow_v7'];
@@ -42,6 +43,8 @@ let pendingProdAction = null;
 let clientDetailIndex = {};
 let personalChart     = null;
 let trendChart        = null;
+let autoBackupTimer   = null;
+let prefs             = { backupEnabled:false, backupIntervalMin:15, backupFolderConnected:false, lastBackupAt:null };
 
 /* ══ CONSTANTS ══ */
 const STAGES = ['col-prospect','col-contacted','col-proposal','col-potential','col-won','col-lost'];
@@ -58,7 +61,7 @@ function fmtDate(ts){return new Date(ts).toLocaleDateString('en-IN',{day:'2-digi
 function daysSince(ts){return Math.floor((Date.now()-(ts||Date.now()))/86400000);}
 function daysLeft(d){return Math.max(0,Math.ceil((d-Date.now())/86400000));}
 function todayISO(){return new Date().toISOString().split('T')[0];}
-function escHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function escHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function sanitize(v){return String(v||'').replace(/[<>\u0000-\u001F]/g,'').trim();}
 function isValidEmail(v){return !v||/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);}
 function isValidPhone(v){return !v||/^[0-9]{10,15}$/.test(v.replace(/\D/g,''));}
@@ -93,6 +96,7 @@ function loadAll(){
   try{ goals    = JSON.parse(localStorage.getItem(GOALS_KEY)||'[]'); }catch(e){goals=[];}
   try{ reviews  = JSON.parse(localStorage.getItem(REVIEWS_KEY)||'[]'); }catch(e){reviews=[];}
   try{ auditLog = JSON.parse(localStorage.getItem(AUDIT_KEY)||'[]'); }catch(e){auditLog=[];}
+  try{ prefs = {...prefs,...JSON.parse(localStorage.getItem(PREF_KEY)||'{}')}; }catch(e){}
   if(!Array.isArray(entries)) entries=[];
   if(!Array.isArray(leads))   leads=[];
   if(!Array.isArray(sipLog))  sipLog=[];
@@ -107,14 +111,91 @@ function saveAll(){
   localStorage.setItem(SIP_KEY,    JSON.stringify(sipLog));
   localStorage.setItem(GOALS_KEY,  JSON.stringify(goals));
   localStorage.setItem(REVIEWS_KEY,JSON.stringify(reviews));
+  localStorage.setItem(PREF_KEY,   JSON.stringify(prefs));
   const t = new Date().toLocaleTimeString();
   const el1=$('lastSyncTime');  if(el1) el1.textContent='Saved '+t;
   const el2=$('lastSyncTime2'); if(el2) el2.textContent=t;
+  queueBackup();
+}
+
+function getUnifiedPayload(){
+  return {entries,leads,targets,sipLog,goals,reviews,auditLog,exportedAt:new Date().toISOString()};
+}
+
+function queueBackup(){
+  if(!prefs.backupEnabled || !window.showDirectoryPicker) return;
+  if(queueBackup._t) clearTimeout(queueBackup._t);
+  queueBackup._t=setTimeout(runManualBackup,800);
+}
+
+async function connectBackupFolder(){
+  if(!window.showDirectoryPicker){alert('Folder backup is not supported in this browser. Use Export JSON in Settings.');return;}
+  try{
+    const dir=await window.showDirectoryPicker();
+    window.__kkBackupDirHandle=dir;
+    prefs.backupFolderConnected=true;
+    addAudit('Backup folder connected');
+    saveAll();
+    updateBackupUI();
+  }catch(err){
+    if(err?.name!=='AbortError') alert('Unable to connect folder: '+err.message);
+  }
+}
+
+async function runManualBackup(){
+  if(!prefs.backupEnabled && !window.__kkBackupDirHandle) return;
+  if(!window.__kkBackupDirHandle){ updateBackupUI('Connect folder to start backups.'); return; }
+  try{
+    const filename=`KalpaKuber_AutoBackup_${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
+    const fileHandle=await window.__kkBackupDirHandle.getFileHandle(filename,{create:true});
+    const writable=await fileHandle.createWritable();
+    await writable.write(JSON.stringify(getUnifiedPayload(),null,2));
+    await writable.close();
+    prefs.lastBackupAt=Date.now();
+    addAudit('Backup snapshot created');
+    saveAll();
+    updateBackupUI();
+  }catch(err){
+    updateBackupUI('Backup failed: permission or folder access issue.');
+  }
+}
+
+function toggleAutoBackup(enabled){
+  prefs.backupEnabled=!!enabled;
+  scheduleAutoBackup();
+  saveAll();
+  updateBackupUI();
+}
+
+function updateBackupInterval(v){
+  const n=Math.max(2,Math.min(120,parseInt(v,10)||15));
+  prefs.backupIntervalMin=n;
+  const el=$('backupInterval'); if(el) el.value=n;
+  scheduleAutoBackup();
+  saveAll();
+}
+
+function scheduleAutoBackup(){
+  if(autoBackupTimer) clearInterval(autoBackupTimer);
+  if(prefs.backupEnabled) autoBackupTimer=setInterval(runManualBackup,prefs.backupIntervalMin*60000);
+}
+
+function updateBackupUI(msg){
+  const status=$('backup-status');
+  const enabled=$('backupEnabled');
+  const interval=$('backupInterval');
+  if(enabled) enabled.checked=!!prefs.backupEnabled;
+  if(interval) interval.value=prefs.backupIntervalMin||15;
+  if(!status) return;
+  if(msg){status.textContent=msg;return;}
+  const connected=window.__kkBackupDirHandle||prefs.backupFolderConnected;
+  const last=prefs.lastBackupAt?new Date(prefs.lastBackupAt).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'Never';
+  status.textContent=`Status: ${connected?'Folder connected':'No folder connected'} · Last backup: ${last}`;
 }
 
 /* ══ EXPORT / IMPORT ══ */
 function exportUnifiedJSON(){
-  const blob=new Blob([JSON.stringify({entries,leads,targets,sipLog,goals,reviews,auditLog,exportedAt:new Date().toISOString()},null,2)],{type:'application/json'});
+  const blob=new Blob([JSON.stringify(getUnifiedPayload(),null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
   a.href=url;a.download=`KalpaKuber_Backup_${todayISO()}.json`;
@@ -228,7 +309,7 @@ function updateEditorMeta(e){
     const combined=[...clientNames.map(n=>'#'+n),...builtins.map(t=>'#'+t)].slice(0,8);
     if(combined.length){
       $('tag-suggest').style.display='flex';
-      $('tag-suggest').innerHTML=combined.map(t=>`<span onclick="insertTag('${escHtml(t)}')">${escHtml(t)}</span>`).join('');
+      $('tag-suggest').innerHTML=combined.map(t=>`<button type="button" class="tag-chip" data-tag="${escHtml(t)}">${escHtml(t)}</button>`).join('');
     } else {$('tag-suggest').style.display='none';}
   } else {$('tag-suggest').style.display='none';}
   // Live BI hint
@@ -1425,7 +1506,7 @@ function renderSettings(){
   const si=$('storage-info');
   if(si){
     let total=0;
-    [PS_KEY,LF_KEY,TGT_KEY,SIP_KEY,GOALS_KEY,REVIEWS_KEY].forEach(k=>{const v=localStorage.getItem(k)||'';total+=v.length;});
+    [PS_KEY,LF_KEY,TGT_KEY,SIP_KEY,GOALS_KEY,REVIEWS_KEY,PREF_KEY].forEach(k=>{const v=localStorage.getItem(k)||'';total+=v.length;});
     si.innerHTML=`Entries: ${entries.length} · Leads: ${leads.length} · SIP Entries: ${sipLog.length} · Goals: ${goals.length} · Reviews: ${reviews.length}<br>Approx storage used: ${(total/1024).toFixed(1)} KB`;
   }
 }
@@ -1497,8 +1578,16 @@ function init(){
   updateInsights();
   updateStats();
   setInterval(updateReminders,60000);
+  scheduleAutoBackup();
+  updateBackupUI();
   document.addEventListener('visibilitychange',()=>{if(!document.hidden) updateReminders();});
 }
+
+// Delegate tag suggestion click safely
+document.addEventListener('click',e=>{
+  const btn=e.target.closest('#tag-suggest .tag-chip');
+  if(btn) insertTag(btn.dataset.tag||'');
+});
 
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init,{once:true});
 else init();

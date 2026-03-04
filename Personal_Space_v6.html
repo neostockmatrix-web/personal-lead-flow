@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>KalpaKuber Intelligence OS v8</title>
+<title>KalpaKuber Intelligence OS v9</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
-<link rel="stylesheet" href="style.css"/>
+<link rel="stylesheet" href="styles.css"/>
 </head>
 <body>
 <div class="app-shell">
@@ -476,6 +476,25 @@
     <div class="settings-section">
       <h3>💾 Storage Info</h3>
       <div id="storage-info" style="font-size:.76rem;color:var(--text-muted);"></div>
+    </div>
+    <div class="settings-section">
+      <h3>🗂️ Optional Drive Backup</h3>
+      <p style="font-size:.74rem;color:var(--text-muted);margin-bottom:10px;">For browser security, this app cannot auto-access your folders. Use "Connect Folder" once to enable periodic JSON backup snapshots.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+        <button class="btn-primary" onclick="connectBackupFolder()">Connect Folder</button>
+        <button onclick="runManualBackup()" style="padding:7px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.78rem;font-weight:700;">Run Backup Now</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
+        <label style="font-size:.75rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
+          <input type="checkbox" id="backupEnabled" onchange="toggleAutoBackup(this.checked)"> Enable periodic backups
+        </label>
+        <label style="font-size:.75rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
+          Every
+          <input id="backupInterval" type="number" min="2" max="120" value="15" onchange="updateBackupInterval(this.value)" style="width:70px;padding:5px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);">
+          minutes
+        </label>
+      </div>
+      <div id="backup-status" style="font-size:.72rem;color:var(--text-dim);"></div>
     </div>
   </div>
 
