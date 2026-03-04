@@ -20,6 +20,7 @@ const SIP_KEY     = 'kk_siplog_v8';
 const GOALS_KEY   = 'kk_goals_v8';
 const REVIEWS_KEY = 'kk_reviews_v8';
 const AUDIT_KEY   = 'kk_audit_v8';
+const PREF_KEY    = 'kk_prefs_v1';
 
 /* Legacy key migration */
 const LEGACY_LF  = ['kk_leads','kk_leads_v2','kk_leadflow','kk_leadflow_v7'];
@@ -42,6 +43,12 @@ let pendingProdAction = null;
 let clientDetailIndex = {};
 let personalChart     = null;
 let trendChart        = null;
+let autoBackupTimer   = null;
+let prefs             = { backupEnabled:false, backupIntervalMin:15, backupFolderConnected:false, lastBackupAt:null, darkMode:false, cloudSyncEnabled:false, cloudSyncUrl:'', lastCloudSyncAt:null };
+let editingEntryId    = null;
+let entryLimit        = 60;
+let lastDeletedEntry  = null;
+let lastDeletedTimer  = null;
 
 /* ══ CONSTANTS ══ */
 const STAGES = ['col-prospect','col-contacted','col-proposal','col-potential','col-won','col-lost'];
@@ -55,15 +62,68 @@ const $ = id => document.getElementById(id);
 function fmt(n){return Number(n||0).toLocaleString('en-IN');}
 function fmtCr(n){if(!n)return'0';if(n>=1e7)return(n/1e7).toFixed(2)+' Cr';if(n>=1e5)return(n/1e5).toFixed(2)+' L';return fmt(n);}
 function fmtDate(ts){return new Date(ts).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});}
+function fmtDateTime(ts){return new Date(ts).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});}
 function daysSince(ts){return Math.floor((Date.now()-(ts||Date.now()))/86400000);}
 function daysLeft(d){return Math.max(0,Math.ceil((d-Date.now())/86400000));}
 function todayISO(){return new Date().toISOString().split('T')[0];}
-function escHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function escHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function sanitize(v){return String(v||'').replace(/[<>\u0000-\u001F]/g,'').trim();}
 function isValidEmail(v){return !v||/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);}
 function isValidPhone(v){return !v||/^[0-9]{10,15}$/.test(v.replace(/\D/g,''));}
 function safeId(v){return String(v||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')||'client';}
 function getStaleDays(){return{'col-prospect':parseInt(targets.staleProspect)||5,'col-contacted':parseInt(targets.staleContacted)||7,'col-proposal':parseInt(targets.staleProposal)||10,'col-potential':parseInt(targets.stalePotential)||21};}
+function genId(){return (window.crypto&&crypto.randomUUID)?crypto.randomUUID():'id-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);}
+function validateLead(lead){
+  if(!lead||typeof lead!=='object') return null;
+  if(!lead.id) lead.id=genId();
+  if(!lead.name) return null;
+  lead.stage=STAGES.includes(lead.stage)?lead.stage:'col-prospect';
+  lead.products=Array.isArray(lead.products)?lead.products:[];
+  lead.history=Array.isArray(lead.history)?lead.history:[];
+  lead.createdAt=lead.createdAt||Date.now();
+  lead.stageEntryDate=lead.stageEntryDate||lead.createdAt;
+  lead.deletedAt=lead.deletedAt||null;
+  lead.muted=!!lead.muted;
+  if(lead.nextAction){lead.nextFollowUpDate=lead.nextAction;lead.followUpStatus=lead.nextAction<todayISO()?'overdue':'scheduled';}
+  else {lead.nextFollowUpDate='';lead.followUpStatus='none';}
+  return lead;
+}
+function validateEntry(entry){
+  if(!entry||typeof entry!=='object'||!entry.text) return null;
+  if(!entry.id) entry.id=genId();
+  entry.type=['Note','Task','Habit'].includes(entry.type)?entry.type:'Note';
+  entry.tags=Array.isArray(entry.tags)?entry.tags:[];
+  entry.linkedLeadIds=Array.isArray(entry.linkedLeadIds)?entry.linkedLeadIds.filter(Boolean):[];
+  entry.linkedLeadId=entry.linkedLeadId||entry.linkedLeadIds[0]||'';
+  entry.sourceType=entry.sourceType||'manual-log';
+  return entry;
+}
+
+function normKey(v){return String(v||'').toLowerCase().replace(/[^a-z0-9]/g,'');}
+function extractClientTags(text){return [...new Set((String(text||'').match(/#([A-Za-z][A-Za-z0-9_-]*)/g)||[]).map(t=>t.slice(1)))];}
+function resolveLinkedLeadIds(text,selectedLeadId=''){
+  const tags=extractClientTags(text);
+  const ids=[];
+  const addId=id=>{if(id&&!ids.includes(id)) ids.push(id);};
+  tags.forEach(tag=>{
+    const nk=normKey(tag);
+    const match=leads.find(l=>normKey(l.name)===nk || normKey(l.id)===nk);
+    if(match) addId(match.id);
+  });
+  if(selectedLeadId) addId(selectedLeadId);
+  return {tags,ids};
+}
+
+function updateLogClientOptions(){
+  const sel=$('logClientLink'); if(!sel) return;
+  const prev=sel.value;
+  const opts=['<option value="">Link client (optional)</option>'];
+  [...leads].sort((a,b)=>String(a.name).localeCompare(String(b.name))).forEach(l=>{
+    opts.push(`<option value="${escHtml(l.id)}">${escHtml(l.name)} · ${escHtml(l.id)}</option>`);
+  });
+  sel.innerHTML=opts.join('');
+  if(prev && [...sel.options].some(o=>o.value===prev)) sel.value=prev;
+}
 
 function addAudit(msg){
   auditLog.unshift({ts:Date.now(),msg});
@@ -93,12 +153,17 @@ function loadAll(){
   try{ goals    = JSON.parse(localStorage.getItem(GOALS_KEY)||'[]'); }catch(e){goals=[];}
   try{ reviews  = JSON.parse(localStorage.getItem(REVIEWS_KEY)||'[]'); }catch(e){reviews=[];}
   try{ auditLog = JSON.parse(localStorage.getItem(AUDIT_KEY)||'[]'); }catch(e){auditLog=[];}
+  try{ prefs = {...prefs,...JSON.parse(localStorage.getItem(PREF_KEY)||'{}')}; }catch(e){}
   if(!Array.isArray(entries)) entries=[];
   if(!Array.isArray(leads))   leads=[];
+  entries=entries.map(validateEntry).filter(Boolean);
+  leads=leads.map(validateLead).filter(Boolean);
   if(!Array.isArray(sipLog))  sipLog=[];
   if(!Array.isArray(goals))   goals=[];
   if(!Array.isArray(reviews)) reviews=[];
 }
+
+function applyTheme(){document.body.setAttribute('data-theme',prefs.darkMode?'dark':'light');const t=$('darkModeToggle');if(t)t.checked=!!prefs.darkMode;}
 
 function saveAll(){
   localStorage.setItem(PS_KEY,     JSON.stringify(entries));
@@ -107,14 +172,113 @@ function saveAll(){
   localStorage.setItem(SIP_KEY,    JSON.stringify(sipLog));
   localStorage.setItem(GOALS_KEY,  JSON.stringify(goals));
   localStorage.setItem(REVIEWS_KEY,JSON.stringify(reviews));
+  localStorage.setItem(PREF_KEY,   JSON.stringify(prefs));
   const t = new Date().toLocaleTimeString();
   const el1=$('lastSyncTime');  if(el1) el1.textContent='Saved '+t;
   const el2=$('lastSyncTime2'); if(el2) el2.textContent=t;
+  queueBackup();
+}
+
+function getUnifiedPayload(){
+  return {entries,leads,targets,sipLog,goals,reviews,auditLog,exportedAt:new Date().toISOString()};
+}
+
+function queueBackup(){
+  if(!prefs.backupEnabled || !window.showDirectoryPicker) return;
+  if(queueBackup._t) clearTimeout(queueBackup._t);
+  queueBackup._t=setTimeout(runManualBackup,800);
+}
+
+async function connectBackupFolder(){
+  if(!window.showDirectoryPicker){alert('Folder backup is not supported in this browser. Use Export JSON in Settings.');return;}
+  try{
+    const dir=await window.showDirectoryPicker();
+    window.__kkBackupDirHandle=dir;
+    prefs.backupFolderConnected=true;
+    addAudit('Backup folder connected');
+    saveAll();
+    updateBackupUI();
+  }catch(err){
+    if(err?.name!=='AbortError') alert('Unable to connect folder: '+err.message);
+  }
+}
+
+async function syncCloudBackup(payload){
+  if(!prefs.cloudSyncEnabled||!prefs.cloudSyncUrl) return;
+  try{
+    await fetch(prefs.cloudSyncUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    prefs.lastCloudSyncAt=Date.now();
+  }catch(e){ addAudit('Cloud sync failed'); }
+}
+
+async function runManualBackup(){
+  if(!prefs.backupEnabled && !window.__kkBackupDirHandle) return;
+  if(!window.__kkBackupDirHandle){ updateBackupUI('Connect folder to start backups.'); return; }
+  try{
+    const filename=`KalpaKuber_AutoBackup_${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
+    const fileHandle=await window.__kkBackupDirHandle.getFileHandle(filename,{create:true});
+    const writable=await fileHandle.createWritable();
+    await writable.write(JSON.stringify(getUnifiedPayload(),null,2));
+    await writable.close();
+    prefs.lastBackupAt=Date.now();
+    await syncCloudBackup(getUnifiedPayload());
+    addAudit('Backup snapshot created');
+    saveAll();
+    updateBackupUI();
+  }catch(err){
+    updateBackupUI('Backup failed: permission or folder access issue.');
+  }
+}
+
+function toggleAutoBackup(enabled){
+  prefs.backupEnabled=!!enabled;
+  scheduleAutoBackup();
+  saveAll();
+  updateBackupUI();
+}
+
+function updateBackupInterval(v){
+  const n=Math.max(2,Math.min(120,parseInt(v,10)||15));
+  prefs.backupIntervalMin=n;
+  const el=$('backupInterval'); if(el) el.value=n;
+  scheduleAutoBackup();
+  saveAll();
+}
+
+function toggleCloudSync(enabled){prefs.cloudSyncEnabled=!!enabled;saveAll();updateBackupUI();}
+function setCloudSyncUrl(v){prefs.cloudSyncUrl=sanitize(v);saveAll();}
+function toggleDarkMode(enabled){prefs.darkMode=!!enabled;applyTheme();saveAll();}
+
+function scheduleAutoBackup(){
+  if(autoBackupTimer) clearInterval(autoBackupTimer);
+  if(prefs.backupEnabled) autoBackupTimer=setInterval(runManualBackup,prefs.backupIntervalMin*60000);
+}
+
+function updateBackupUI(msg){
+  const status=$('backup-status');
+  const enabled=$('backupEnabled');
+  const interval=$('backupInterval');
+  if(enabled) enabled.checked=!!prefs.backupEnabled;
+  if(interval) interval.value=prefs.backupIntervalMin||15;
+  const cse=$('cloudSyncEnabled'); if(cse) cse.checked=!!prefs.cloudSyncEnabled;
+  const csu=$('cloudSyncUrl'); if(csu) csu.value=prefs.cloudSyncUrl||'';
+  if(!status) return;
+  const dot=$('backupDot');
+  if(msg){status.textContent=msg;if(dot)dot.textContent='🟡';return;}
+  const connected=window.__kkBackupDirHandle||prefs.backupFolderConnected;
+  const last=prefs.lastBackupAt?new Date(prefs.lastBackupAt).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'Never';
+  status.textContent=`Status: ${connected?'Folder connected':'No folder connected'} · Last backup: ${last}`;
+  const bh=$('backup-health');
+  const stale=prefs.lastBackupAt?daysSince(prefs.lastBackupAt):999;
+  const cloud=prefs.lastCloudSyncAt?`Cloud: ${new Date(prefs.lastCloudSyncAt).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}`:'Cloud: never';
+  const healthIcon=stale<=1?'🟢':stale<=7?'🟡':'🔴';
+  if(bh) bh.textContent=`Backup health: ${stale<=1?'🟢 Healthy':stale<=7?'🟡 Delayed':'🔴 Stale'} · ${cloud}`;
+  if(dot) dot.textContent=connected?healthIcon:'🔴';
 }
 
 /* ══ EXPORT / IMPORT ══ */
 function exportUnifiedJSON(){
-  const blob=new Blob([JSON.stringify({entries,leads,targets,sipLog,goals,reviews,auditLog,exportedAt:new Date().toISOString()},null,2)],{type:'application/json'});
+  const blob=new Blob([JSON.stringify(getUnifiedPayload(),null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
   a.href=url;a.download=`KalpaKuber_Backup_${todayISO()}.json`;
@@ -134,6 +298,8 @@ function importUnifiedJSON(ev){
       if(data.goals    &&Array.isArray(data.goals))     goals=data.goals;
       if(data.reviews  &&Array.isArray(data.reviews))   reviews=data.reviews;
       if(Array.isArray(data)) leads=data; // legacy leads-only
+      entries=entries.map(validateEntry).filter(Boolean);
+      leads=leads.map(validateLead).filter(Boolean);
       saveAll();renderAll();
       addAudit(`Imported — ${entries.length} entries, ${leads.length} leads`);
       alert(`✅ Imported!\nEntries: ${entries.length} | Leads: ${leads.length}`);
@@ -228,7 +394,7 @@ function updateEditorMeta(e){
     const combined=[...clientNames.map(n=>'#'+n),...builtins.map(t=>'#'+t)].slice(0,8);
     if(combined.length){
       $('tag-suggest').style.display='flex';
-      $('tag-suggest').innerHTML=combined.map(t=>`<span onclick="insertTag('${escHtml(t)}')">${escHtml(t)}</span>`).join('');
+      $('tag-suggest').innerHTML=combined.map(t=>`<button type="button" class="tag-chip" data-tag="${escHtml(t)}">${escHtml(t)}</button>`).join('');
     } else {$('tag-suggest').style.display='none';}
   } else {$('tag-suggest').style.display='none';}
   // Live BI hint
@@ -282,7 +448,15 @@ function insertTag(tag){
 }
 
 function toggleTaskUI(){$('taskExtras').style.display=$('type').value==='Task'?'inline-flex':'none';}
-function resetForm(){$('content').value='';$('reminder').value='';selectMood(3);$('type').value='Note';toggleTaskUI();$('editor-meta').textContent='0 words';const ll=$('log-lead-links');if(ll)ll.innerHTML='';}
+function resetForm(){
+  editingEntryId=null;
+  $('content').value='';$('reminder').value='';selectMood(3);$('type').value='Note';
+  if($('logClientLink')) $('logClientLink').value='';
+  toggleTaskUI();$('editor-meta').textContent='0 words';
+  const ll=$('log-lead-links');if(ll)ll.innerHTML='';
+  const sb=$('saveBtn'); if(sb) sb.textContent='Save Entry';
+  const es=$('editor-status'); if(es) es.textContent='';
+}
 
 function insertTemplate(){$('content').value='## Reflection\n**What went well:**\n\n**What could improve:**\n\n**Key insight:**\n';}
 function insertWin(){$('content').value+='🏆 WIN: ';}
@@ -290,8 +464,10 @@ function insertHabit(){$('content').value+='🔄 HABIT: ';}
 function insertNote(){$('content').value+='💡 INSIGHT: ';}
 function insertMorning(){$('content').value='☀️ Morning Intention:\n**Focus today:**\n**Energy intention:**\n**Top 3 tasks:**\n1. \n2. \n3. \n';}
 function insertClient(){
-  const name=leads.length?leads[0].name:'ClientName';
+  const lead=leads[0]||null;
+  const name=lead?lead.name:'ClientName';
   $('content').value+=`👤 CLIENT LOG #${name.replace(/\s/g,'')}: `;
+  if($('logClientLink')&&lead) $('logClientLink').value=lead.id;
   $('type').value='Note';
   renderLogLeadLinks($('content').value);
 }
@@ -303,41 +479,73 @@ function saveEntry(){
   const type=$('type').value;
   const priority=type==='Task'?$('priority').value:null;
   const reminder=$('reminder').value||null;
-  // Extract all tags (includes client names)
-  const clientTags=[...new Set((text.match(/#([A-Za-z][A-Za-z0-9_]*)/g)||[]).map(t=>t.slice(1)))];
-  // Find any linked lead IDs for cross-reference
-  const linkedLeadIds=clientTags.reduce((acc,tag)=>{
-    const match=leads.find(l=>l.name.toLowerCase()===tag.toLowerCase());
-    if(match&&!acc.includes(match.id)) acc.push(match.id);
-    return acc;
-  },[]);
-  const entry={
-    id:Date.now(),text,type,priority,reminder,
-    energy:currentMood,done:false,
-    tags:clientTags,
-    linkedLeadIds, // ← cross-reference to LeadFlow
-    date:new Date().toISOString(),
-    dateShort:fmtDate(Date.now())
-  };
-  entries.unshift(entry);
-  // Also add a history note to linked leads
-  if(linkedLeadIds.length){
-    const snippet=text.slice(0,120).replace(/\n/g,' ');
-    leads=leads.map(l=>{
-      if(!linkedLeadIds.includes(l.id)) return l;
-      const hist=[...(l.history||[])];
-      hist.unshift({date:fmtDate(Date.now()),msg:`📝 Log: ${snippet}`});
-      return {...l,history:hist,lastUpdated:Date.now()};
-    });
+  const selectedLeadId=$('logClientLink')?.value||'';
+  const {tags:clientTags,ids:linkedLeadIds}=resolveLinkedLeadIds(text,selectedLeadId);
+  const now=Date.now();
+
+  if(editingEntryId){
+    entries=entries.map(e=>String(e.id)===String(editingEntryId)?{
+      ...e,
+      text,type,priority,reminder,energy:currentMood,tags:clientTags,linkedLeadId:linkedLeadIds[0]||'',linkedLeadIds,linkedTaskId:e.linkedTaskId||null,sourceType:e.sourceType||'manual-log',
+      done:e.done,
+      updatedAt:new Date().toISOString()
+    }:e);
+    if(linkedLeadIds.length){
+      const snippet=text.slice(0,120).replace(/\n/g,' ');
+      leads=leads.map(l=>{
+        if(!linkedLeadIds.includes(l.id)) return l;
+        const hist=[...(l.history||[])];
+        hist.unshift({date:fmtDate(now),msg:`✏️ Log updated: ${snippet}`});
+        return {...l,history:hist,lastUpdated:now};
+      });
+    }
+    addAudit(`Log entry updated (${type})${linkedLeadIds.length?' — linked: '+linkedLeadIds.join(', '):''}`);
+  } else {
+    const entry={
+      id:genId(),text,type,priority,reminder,
+      energy:currentMood,done:false,
+      tags:clientTags,
+      linkedLeadId:linkedLeadIds[0]||'',
+      linkedLeadIds,
+      linkedTaskId:null,
+      sourceType:'manual-log',
+      date:new Date().toISOString(),
+      dateShort:fmtDate(now)
+    };
+    entries.unshift(entry);
+    if(linkedLeadIds.length){
+      const snippet=text.slice(0,120).replace(/\n/g,' ');
+      leads=leads.map(l=>{
+        if(!linkedLeadIds.includes(l.id)) return l;
+        const hist=[...(l.history||[])];
+        hist.unshift({date:fmtDate(now),msg:`📝 Log: ${snippet}`});
+        return {...l,history:hist,lastUpdated:now};
+      });
+    }
+    addAudit(`Log entry saved (${type})${linkedLeadIds.length?' — linked: '+linkedLeadIds.join(', '):''}`);
   }
+
   saveAll();
-  renderEntries();
-  renderStatsPanel();
-  updatePriorityIntel();
-  updateReminders();
-  renderBiKpis();
+  refreshAfterEntryChange();
   resetForm();
-  addAudit(`Log entry saved (${type})${linkedLeadIds.length?' — linked: '+linkedLeadIds.join(', '):''}`);
+}
+
+function editEntry(id){
+  const e=entries.find(x=>String(x.id)===String(id)); if(!e) return;
+  editingEntryId=id;
+  $('content').value=e.text||'';
+  $('type').value=e.type||'Note';
+  toggleTaskUI();
+  if($('priority')) $('priority').value=e.priority||'Low';
+  $('reminder').value=e.reminder||'';
+  selectMood(e.energy||3);
+  if($('logClientLink')) $('logClientLink').value=(e.linkedLeadIds||[])[0]||'';
+  const sb=$('saveBtn'); if(sb) sb.textContent='Update Entry';
+  const es=$('editor-status'); if(es) es.textContent='✏️ Editing entry — Save to update';
+  window.scrollTo({top:0,behavior:'smooth'});
+  updateEditorMeta({target:$('content')});
+  $('content').focus();
+  $('content').setSelectionRange($('content').value.length,$('content').value.length);
 }
 
 /* ══ RENDER ENTRIES ══ */
@@ -350,8 +558,9 @@ function renderEntries(){
     if(search&&!e.text.toLowerCase().includes(search)) return false;
     return true;
   });
-  if(!filtered.length){list.innerHTML='<div style="text-align:center;padding:30px;color:var(--text-dim);">No entries yet. Start logging above ↑</div>';return;}
-  list.innerHTML=filtered.slice(0,60).map(e=>{
+  if(!filtered.length){list.innerHTML='<div style="text-align:center;padding:30px;color:var(--text-dim);">No entries yet. Start logging above ↑</div>';const lmb=$('load-more-entries');if(lmb)lmb.style.display='none';return;}
+  const visible=filtered.slice(0,entryLimit);
+  list.innerHTML=visible.map(e=>{
     // Build linked lead badges for entries that have linked leads
     const linkedBadges=(e.linkedLeadIds||[]).map(lid=>{
       const lead=leads.find(l=>l.id===lid);
@@ -364,20 +573,59 @@ function renderEntries(){
           ${e.priority?`<span class="priority-tag ${e.priority}" style="margin-left:5px;">${e.priority}</span>`:''}
           ${e.reminder?`<span style="font-size:.65rem;color:var(--accent-amber);margin-left:5px;">🔔 ${new Date(e.reminder).toLocaleString('en-IN',{month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>`:''}
         </div>
-        <div class="entry-meta"><span class="energy-dot mood-${e.energy}"></span>${e.dateShort}</div>
+        <div class="entry-meta"><span class="energy-dot mood-${e.energy}"></span>${e.dateShort}${e.updatedAt?` · edited ${fmtDateTime(e.updatedAt)}`:''}</div>
       </div>
       <div class="entry-body">${escHtml(e.text.slice(0,400))}${e.text.length>400?'…':''}</div>
       ${linkedBadges?`<div style="margin-top:5px;">${linkedBadges}</div>`:''}
       <div class="entry-actions">
-        ${e.type==='Task'?`<button onclick="toggleDone(${e.id})">${e.done?'↩️ Reopen':'✅ Done'}</button>`:''}
-        <button onclick="deleteEntry(${e.id})">🗑 Delete</button>
+        <button type="button" data-entry-action="edit" data-entry-id="${escHtml(e.id)}">✏️ Edit</button>
+        ${e.type==='Task'?`<button type="button" data-entry-action="toggle" data-entry-id="${escHtml(e.id)}">${e.done?'↩️ Reopen':'✅ Done'}</button>`:''}
+        <button type="button" data-entry-action="delete" data-entry-id="${escHtml(e.id)}">🗑 Delete</button>
       </div>
     </div>`;
   }).join('');
+  const lmb=$('load-more-entries');
+  if(lmb) lmb.style.display=filtered.length>entryLimit?'':'none';
 }
 
-function toggleDone(id){entries=entries.map(e=>e.id===id?{...e,done:!e.done}:e);saveAll();renderEntries();renderStatsPanel();}
-function deleteEntry(id){if(!confirm('Delete this entry?'))return;entries=entries.filter(e=>e.id!==id);saveAll();renderEntries();renderStatsPanel();updatePriorityIntel();}
+
+function loadMoreEntries(){entryLimit+=60;renderEntries();}
+
+function activeMainTab(){
+  return document.querySelector('#main-tab-nav .tab-btn.active')?.getAttribute('onclick')?.match(/'([^']+)'/)?.[1]||'log';
+}
+function refreshAfterEntryChange(){
+  const tab=activeMainTab();
+  if(tab==='log') renderEntries();
+  if(tab==='tasks') renderTasks();
+  if(tab==='habits') renderHabits();
+  renderStatsPanel();
+  updatePriorityIntel();
+  updateReminders();
+  renderBiKpis();
+}
+
+function toggleDone(id){entries=entries.map(e=>String(e.id)===String(id)?{...e,done:!e.done}:e);saveAll();refreshAfterEntryChange();}
+function deleteEntry(id){
+  const idx=entries.findIndex(e=>String(e.id)===String(id));
+  if(idx<0) return;
+  const removed=entries[idx];
+  entries.splice(idx,1);
+  lastDeletedEntry={entry:removed,index:idx,expiresAt:Date.now()+5000};
+  if(lastDeletedTimer) clearTimeout(lastDeletedTimer);
+  lastDeletedTimer=setTimeout(()=>{lastDeletedEntry=null;const es=$('editor-status');if(es&&es.textContent.includes('Undo'))es.textContent='';},5000);
+  saveAll();refreshAfterEntryChange();
+  const es=$('editor-status');
+  if(es) es.innerHTML='🗑 Entry deleted. <button type="button" onclick="undoDeleteEntry()" style="margin-left:6px;padding:2px 7px;border:1px solid var(--border);border-radius:4px;background:var(--surface2);color:var(--text);">Undo</button>';
+}
+function undoDeleteEntry(){
+  if(!lastDeletedEntry) return;
+  entries.splice(Math.min(lastDeletedEntry.index,entries.length),0,lastDeletedEntry.entry);
+  lastDeletedEntry=null;
+  if(lastDeletedTimer) clearTimeout(lastDeletedTimer);
+  const es=$('editor-status'); if(es) es.textContent='↩️ Delete undone.';
+  saveAll();refreshAfterEntryChange();
+}
 
 /* ══ TASKS ══ */
 function renderTasks(){
@@ -393,13 +641,13 @@ function renderTasks(){
     <div class="entry-card ${t.done?'task-done':''}" style="margin-bottom:6px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;">
         <div style="display:flex;gap:8px;align-items:flex-start;flex:1;">
-          <input type="checkbox" ${t.done?'checked':''} onchange="toggleDone(${t.id})" style="margin-top:3px;accent-color:var(--primary);">
+          <input type="checkbox" ${t.done?'checked':''} data-task-action="toggle" data-task-id="${escHtml(t.id)}" style="margin-top:3px;accent-color:var(--primary);">
           <div>
             <div style="font-size:.82rem;">${escHtml(t.text.slice(0,200))}</div>
             <div style="font-size:.65rem;color:var(--text-muted);margin-top:3px;">${t.dateShort} · <span class="priority-tag ${t.priority}">${t.priority}</span></div>
           </div>
         </div>
-        <button onclick="deleteEntry(${t.id})" style="background:none;border:none;color:var(--text-dim);cursor:pointer;">🗑</button>
+        <div style="display:flex;gap:4px;"><button type="button" data-task-action="edit" data-task-id="${escHtml(t.id)}" style="background:none;border:none;color:var(--text-dim);cursor:pointer;">✏️</button><button type="button" data-task-action="delete" data-task-id="${escHtml(t.id)}" style="background:none;border:none;color:var(--text-dim);cursor:pointer;">🗑</button></div>
       </div>
     </div>`).join('');
 }
@@ -423,11 +671,13 @@ function renderHabits(){
 }
 
 function countStreak(habitEntries,name){
+  const hasToday=habitEntries.some(e=>e.text.includes(name)&&e.date?.startsWith(todayISO()));
   let streak=0,d=new Date();
+  if(!hasToday) d.setDate(d.getDate()-1);
   for(let i=0;i<30;i++){
     const ds=d.toISOString().split('T')[0];
     if(habitEntries.some(e=>e.text.includes(name)&&e.date?.startsWith(ds))) streak++;
-    else if(i>0) break;
+    else break;
     d.setDate(d.getDate()-1);
   }
   return streak;
@@ -435,7 +685,7 @@ function countStreak(habitEntries,name){
 
 function logHabit(name,checked){
   if(!checked) return;
-  entries.unshift({id:Date.now(),text:`🔄 HABIT: ${name}`,type:'Habit',priority:null,reminder:null,energy:currentMood,done:false,tags:[],linkedLeadIds:[],date:new Date().toISOString(),dateShort:fmtDate(Date.now())});
+  entries.unshift({id:genId(),text:`🔄 HABIT: ${name}`,type:'Habit',priority:null,reminder:null,energy:currentMood,done:false,tags:[],linkedLeadId:'',linkedLeadIds:[],linkedTaskId:null,sourceType:'habit-check',date:new Date().toISOString(),dateShort:fmtDate(Date.now())});
   saveAll();
 }
 
@@ -465,7 +715,7 @@ function saveReview(){
   const challenges=$('review-challenges').value.trim();
   const tomorrow=$('review-tomorrow').value.trim();
   if(!score){alert('Please enter a review score.');return;}
-  reviews.unshift({id:Date.now(),score,date,wins,challenges,tomorrow});
+  reviews.unshift({id:genId(),score,date,wins,challenges,tomorrow});
   saveAll();renderReviews();
   $('review-score').value='';$('review-wins').value='';$('review-challenges').value='';$('review-tomorrow').value='';
 }
@@ -614,7 +864,7 @@ function renderGoalsModal(){
 }
 function addGoal(){
   const text=$('new-goal-text').value.trim(); if(!text) return;
-  goals.push({text,done:false,created:Date.now()});
+  goals.push({id:genId(),text,done:false,created:Date.now()});
   $('new-goal-text').value='';
   saveAll();renderGoalsModal();
 }
@@ -693,6 +943,7 @@ function renderLeadFlow(){
   if(name==='lf-referrals') renderReferralTree();
   if(name==='lf-insights')  updateInsights();
   if(name==='lf-analytics') updateStats();
+  updateLogClientOptions();
   // Always default to pipeline if nothing is active
   if(!activeLFPane.classList.contains('active')) renderPipeline();
 }
@@ -700,7 +951,7 @@ function renderLeadFlow(){
 /* ══ LEAD ID GENERATOR ══ */
 function generateLeadID(){
   const yr=new Date().getFullYear();
-  const max=leads.reduce((m,l)=>Math.max(m,parseInt((l.id||'').split('-')[2])||0),0);
+  const max=leads.reduce((m,l)=>Math.max(m,parseInt((l.clientCode||'').split('-')[2])||0),0);
   return `KK-${yr}-${String(max+1).padStart(3,'0')}`;
 }
 
@@ -761,6 +1012,7 @@ function openLeadModal(editId=null){
   document.querySelectorAll('#productCheckboxes input[type=checkbox]').forEach(cb=>{cb.checked=false;cb.closest('.product-check-item')?.classList.remove('selected');});
   const names=[...new Set(leads.map(l=>l.name))].filter(Boolean);
   $('clientNamesList').innerHTML=names.map(n=>`<option value="${escHtml(n)}">`).join('');
+  updateLogClientOptions();
   $('clientIdDisplay').textContent=editId?'Existing':'Auto on Save';
   if(editId){
     const l=leads.find(x=>x.id===editId); if(!l) return;
@@ -800,7 +1052,10 @@ function submitLeadForm(){
   if(!name){alert('Client name is required.');return;}
   if(!isValidPhone(phone)){alert('Enter a valid phone number (10-15 digits).');return;}
   if(!isValidEmail(email)){alert('Enter a valid email address.');return;}
-  const data={name,phone,email,referredBy,products:prods,value:totalValue(prods),revType:$('revType').value,source:$('source').value,temp:$('temp').value,nextAction:$('nextAction').value,actualValue:parseFloat($('actualValue')?.value)||0,lossReason:$('lossReason')?.value||'',lastUpdated:Date.now()};
+  const duplicate=leads.find(l=>l.id!==id && ((phone&&l.phone===phone)||(email&&l.email&&l.email.toLowerCase()===email.toLowerCase())) && !l.deletedAt);
+  if(duplicate&&!confirm(`Possible duplicate found: ${duplicate.name} (${duplicate.clientCode||duplicate.id}). Continue?`)) return;
+  const nextAction=$('nextAction').value;
+  const data={name,phone,email,referredBy,products:prods,value:totalValue(prods),revType:$('revType').value,source:$('source').value,temp:$('temp').value,nextAction,followUpStatus:nextAction?(nextAction<todayISO()?'overdue':'scheduled'):'none',nextFollowUpDate:nextAction||'',actualValue:parseFloat($('actualValue')?.value)||0,lossReason:$('lossReason')?.value||'',lastUpdated:Date.now()};
   if(id){
     leads=leads.map(l=>{
       if(l.id!==id) return l;
@@ -814,7 +1069,7 @@ function submitLeadForm(){
     const newId=generateLeadID();
     const hist=[{date:fmtDate(Date.now()),msg:'🆕 Lead Created'}];
     if(note) hist.unshift({date:fmtDate(Date.now()),msg:'💬 '+note});
-    leads.push({...data,id:newId,stage:'col-prospect',createdAt:Date.now(),stageEntryDate:Date.now(),history:hist});
+    leads.push(validateLead({...data,id:genId(),clientCode:newId,stage:'col-prospect',createdAt:Date.now(),stageEntryDate:Date.now(),history:hist,muted:false,deletedAt:null}));
     addAudit(`New lead: ${name} (${newId})`);
   }
   saveAll();renderLeadFlow();closeLeadModal();
@@ -868,7 +1123,7 @@ function confirmProdWon(){
   $('prodWonModal').style.display='none';
   if(addSip&&sipAmt>0){
     const lead=leads.find(l=>l.id===pendingProdAction.leadId);
-    sipLog.push({id:Date.now(),date:todayISO(),client:lead?.name||'',type:'add',amount:sipAmt,note:`From won deal: ${lead?.products[pendingProdAction.prodIdx]?.product||''}`});
+    sipLog.push({id:genId(),date:todayISO(),client:lead?.name||'',type:'add',amount:sipAmt,note:`From won deal: ${lead?.products[pendingProdAction.prodIdx]?.product||''}`});
   }
   applyProdStatus(pendingProdAction.leadId,pendingProdAction.prodIdx,'won',{actualValue:rev});
   pendingProdAction=null;
@@ -919,8 +1174,10 @@ function quickNote(id){
   saveAll();renderLeadFlow();
 }
 
-/* ══ DELETE LEAD ══ */
-function deleteLead(id){if(!confirm('Delete this lead permanently?'))return;leads=leads.filter(l=>l.id!==id);addAudit(`Deleted lead: ${id}`);saveAll();renderLeadFlow();}
+/* ══ ARCHIVE / RESTORE LEAD ══ */
+function archiveLead(id){if(!confirm('Archive this lead? You can restore later.'))return;leads=leads.map(l=>l.id===id?{...l,deletedAt:Date.now()}:l);addAudit(`Archived lead: ${id}`);saveAll();renderLeadFlow();}
+function restoreLead(id){leads=leads.map(l=>l.id===id?{...l,deletedAt:null}:l);addAudit(`Restored lead: ${id}`);saveAll();renderLeadFlow();renderSettings();}
+function toggleLeadMute(id){leads=leads.map(l=>l.id===id?{...l,muted:!l.muted}:l);saveAll();renderLeadFlow();}
 
 /* ══ RENDER PIPELINE ══ */
 function renderPipeline(){
@@ -928,6 +1185,7 @@ function renderPipeline(){
   const fTemp=$('filterTemp')?.value||'';
   const fSource=$('filterSource')?.value||'';
   const fStale=$('filterStale')?.checked||false;
+  const showArchived=$('filterArchived')?.checked||false;
   const today=todayISO();
   const staleDays=getStaleDays();
   const todays=[];
@@ -936,6 +1194,7 @@ function renderPipeline(){
     const staleLimit=staleDays[stage]||99;
     const filtered=leads.filter(l=>{
       if(l.stage!==stage) return false;
+      if(!showArchived && l.deletedAt) return false;
       if(!l.name.toLowerCase().includes(search)) return false;
       if(fTemp&&l.temp!==fTemp) return false;
       if(fSource&&l.source!==fSource) return false;
@@ -951,8 +1210,10 @@ function renderPipeline(){
       const isStale=daysIn>=staleLimit&&!['col-won','col-lost'].includes(stage);
       const isOverdue=l.nextAction&&l.nextAction<today&&!['col-won','col-lost'].includes(stage);
       const nextStage=STAGES[idx+1];
-      if(l.nextAction===today) todays.push(l.name);
+      if(l.nextAction===today && !l.muted && !l.deletedAt) todays.push(l.name);
       const cardStatus=leadCardStatus(l);
+      const ageClass=daysIn<7?'age-fresh':daysIn<21?'age-watch':'age-risk';
+      const activityScore=Math.min(100,((l.history||[]).length*8)+((entries.filter(e=>(e.linkedLeadIds||[]).includes(l.id)).length)*6)+(l.nextAction?10:0)-(isOverdue?20:0));
       const isPartial=cardStatus==='partial';
       const prodRows=(l.products||[]).map((p,pi)=>`
         <div class="product-row prod-${p.status}">
@@ -968,19 +1229,20 @@ function renderPipeline(){
       let valDisplay=`₹${fmt(l.value)}`;
       if(stage==='col-won'&&l.actualValue){const v=l.value?Math.round(((l.actualValue-l.value)/l.value)*100):0;valDisplay=`₹${fmt(l.actualValue)} <span class="variance-badge ${v>=0?'variance-pos':'variance-neg'}">${v>=0?'+':''}${v}%</span>`;}
       const histHTML=(l.history||[]).slice(0,3).map(h=>`<div class="history-item"><span class="h-date">${h.date}:</span> ${escHtml(h.msg)}</div>`).join('');
-      return `<div class="lead-card ${l.temp}" draggable="true" id="${escHtml(l.id)}" data-lead-id="${escHtml(l.id)}" ondragstart="dragStart(event)" onclick="handleCardClick(event,'${escHtml(l.id)}')">
+      return `<div class="lead-card ${l.temp} ${ageClass}" draggable="true" id="${escHtml(l.id)}" data-lead-id="${escHtml(l.id)}" ondragstart="dragStart(event)" onclick="handleCardClick(event,'${escHtml(l.id)}')">
         ${isOverdue?'<div class="overdue-pulse"></div>':''}
         <div class="lead-card-top">
           <div>
             <div class="lead-name">${escHtml(l.name)}${isPartial?' <span class="partial-tag">PARTIAL</span>':''}</div>
-            <div class="lead-id">🆔 ${escHtml(l.id)}</div>
+            <div class="lead-id">🆔 ${escHtml(l.clientCode||l.id)}</div>
           </div>
           <div class="card-actions">
             <button class="icon-btn" onclick="event.stopPropagation();quickNote('${escHtml(l.id)}')" title="Note">💬</button>
             <button class="icon-btn" onclick="event.stopPropagation();openLeadModal('${escHtml(l.id)}')" title="Edit">✏️</button>
+            <button class="icon-btn" onclick="event.stopPropagation();toggleLeadMute('${escHtml(l.id)}')" title="Mute alerts">${l.muted?'🔕':'🔔'}</button>
           </div>
         </div>
-        <div class="lead-value">${valDisplay}</div>
+        <div class="lead-value">${valDisplay}</div><div style="font-size:.64rem;color:var(--text-muted);margin-bottom:4px;">Attention Index: ${activityScore}</div>
         <div>${prodRows}</div>
         <div class="tag-row">
           <span class="lead-tag source-tag">${escHtml(l.source)}</span>
@@ -999,7 +1261,7 @@ function renderPipeline(){
           ${l.nextAction?`<br><span class="next-date ${isOverdue?'overdue':''}">📅 ${isOverdue?'OVERDUE':'Next'}: ${l.nextAction}</span>`:''}
         </div>
         <div class="card-footer">
-          <button class="btn-del" onclick="event.stopPropagation();deleteLead('${escHtml(l.id)}')">Delete</button>
+          ${l.deletedAt?`<button class="btn-del" onclick="event.stopPropagation();restoreLead('${escHtml(l.id)}')">Restore</button>`:`<button class="btn-del" onclick="event.stopPropagation();archiveLead('${escHtml(l.id)}')">Archive</button>`}
           ${nextStage?`<button class="btn-next" onclick="event.stopPropagation();updateLeadStage('${escHtml(l.id)}','${nextStage}')">Next ➔</button>`:''}
         </div>
         <div class="compact-hint">Tap for full details</div>
@@ -1094,6 +1356,23 @@ function updateDashboard(){
   set('trail-mf-annual','₹'+fmt(mfAnnual)); set('trail-ins-comm','₹'+fmt(insComm));
   set('trail-total','₹'+fmt(totalTrail));
   setProgress('aum',aumCur,aumTgt,'gold');setProgress('sip',sipCur,sipTgt,'teal');setProgress('trail',totalTrail,t.trailTarget||0,'');
+  const pm=$('pipeline-metrics');
+  if(pm){
+    const active=leads.filter(l=>!l.deletedAt && !['col-won','col-lost'].includes(l.stage));
+    const won=leads.filter(l=>!l.deletedAt && l.stage==='col-won');
+    const lost=leads.filter(l=>!l.deletedAt && l.stage==='col-lost');
+    const all=active.length+won.length+lost.length;
+    const conversion=all?Math.round((won.length/all)*100):0;
+    const avgClose=won.length?Math.round(won.reduce((s,l)=>s+daysSince(l.createdAt),0)/won.length):0;
+    const inflow30=leads.filter(l=>!l.deletedAt && daysSince(l.createdAt)<=30).length;
+    const bySource={};
+    leads.filter(l=>!l.deletedAt).forEach(l=>{bySource[l.source]=bySource[l.source]||{t:0,w:0};bySource[l.source].t++;if(l.stage==='col-won')bySource[l.source].w++;});
+    const topSrc=Object.entries(bySource).sort((a,b)=>(b[1].w/(b[1].t||1))-(a[1].w/(a[1].t||1)))[0];
+    pm.innerHTML=`<div class="lf-stat"><div class="ls-label">Conversion</div><div class="ls-val">${conversion}%</div></div>
+      <div class="lf-stat"><div class="ls-label">Avg Time to Close</div><div class="ls-val">${avgClose}d</div></div>
+      <div class="lf-stat"><div class="ls-label">Lead Inflow (30d)</div><div class="ls-val">${inflow30}</div></div>
+      <div class="lf-stat"><div class="ls-label">Best Source</div><div class="ls-val">${topSrc?escHtml(topSrc[0]):'—'}</div><div class="ls-sub">Win rate ${topSrc?Math.round((topSrc[1].w/topSrc[1].t)*100):0}%</div></div>`;
+  }
   renderSipLogWidget();
 }
 
@@ -1137,7 +1416,7 @@ function renderSipLogFull(){
 function addSipLogEntry(){
   const date=$('sl-date').value;const client=sanitize($('sl-client').value);const type=$('sl-type').value;const amount=parseFloat($('sl-amount').value)||0;const note=sanitize($('sl-note').value);
   if(!date||!amount){alert('Please enter date and amount.');return;}
-  sipLog.push({id:Date.now(),date,client,type,amount,note});
+  sipLog.push({id:genId(),date,client,type,amount,note});
   $('sl-client').value='';$('sl-amount').value='';$('sl-note').value='';
   saveAll();renderSipLogFull();renderSipLogWidget();updateDashboard();updateInsights();
 }
@@ -1281,6 +1560,7 @@ function renderPortfolio(){
   }).join('');
 }
 
+
 function renderPortfolioFiltered(){renderPortfolio();}
 
 /* ══ CLIENT DETAIL ══ */
@@ -1380,6 +1660,7 @@ function renderReferralTree(){
   }).join('');
 }
 
+
 /* ══ CLIENTS TAB ══ */
 function renderClientsTab(){
   const search=($('clients-search')?.value||'').toLowerCase();
@@ -1419,14 +1700,20 @@ function renderClientsTab(){
 /* ══ SETTINGS ══ */
 function renderSettings(){
   const ts=$('targets-summary');
+  const dm=$('darkModeToggle'); if(dm) dm.checked=!!prefs.darkMode;
   if(ts) ts.innerHTML=targets.name?`<strong>${escHtml(targets.name)}</strong> · AUM: ₹${fmtCr(targets.aumCurrent||0)} (Target: ₹${fmtCr(targets.aumTarget||0)}) · SIP: ₹${fmt(targets.sipCurrent||0)}/mo`:'No targets set yet.';
   const al=$('audit-log-display');
   if(al) al.innerHTML=auditLog.slice(0,20).map(a=>`<div class="audit-item">${new Date(a.ts).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})} — ${escHtml(a.msg)}</div>`).join('')||'<div class="audit-item" style="color:var(--text-dim);">No audit events yet.</div>';
   const si=$('storage-info');
   if(si){
     let total=0;
-    [PS_KEY,LF_KEY,TGT_KEY,SIP_KEY,GOALS_KEY,REVIEWS_KEY].forEach(k=>{const v=localStorage.getItem(k)||'';total+=v.length;});
-    si.innerHTML=`Entries: ${entries.length} · Leads: ${leads.length} · SIP Entries: ${sipLog.length} · Goals: ${goals.length} · Reviews: ${reviews.length}<br>Approx storage used: ${(total/1024).toFixed(1)} KB`;
+    [PS_KEY,LF_KEY,TGT_KEY,SIP_KEY,GOALS_KEY,REVIEWS_KEY,PREF_KEY].forEach(k=>{const v=localStorage.getItem(k)||'';total+=v.length;});
+    si.innerHTML=`Entries: ${entries.length} · Leads: ${leads.filter(l=>!l.deletedAt).length} (Archived: ${leads.filter(l=>l.deletedAt).length}) · SIP Entries: ${sipLog.length} · Goals: ${goals.length} · Reviews: ${reviews.length}<br>Approx storage used: ${(total/1024).toFixed(1)} KB`;
+  }
+  const ar=$('archived-leads');
+  if(ar){
+    const archived=leads.filter(l=>l.deletedAt);
+    ar.innerHTML=archived.length?archived.map(l=>`<div class="audit-item">${escHtml(l.name)} · ${escHtml(l.clientCode||l.id)} <button class="portfolio-btn" onclick="restoreLead('${escHtml(l.id)}')" style="margin-left:8px;font-size:.66rem;">Restore</button></div>`).join(''):'No archived leads.';
   }
 }
 
@@ -1478,6 +1765,7 @@ function renderAll(){
   renderBiKpis();
   updateStrategicInsight();
   renderGoalDisplay();
+  updateLogClientOptions();
   renderSettings();
   // Only render the active LeadFlow sub-tab to avoid hidden canvas issues
   const lfTabActive=document.querySelector('#tab-leadflow.active');
@@ -1487,6 +1775,7 @@ function renderAll(){
 /* ══ INIT ══ */
 function init(){
   loadAll();
+  applyTheme();
   const rd=$('review-date'); if(rd) rd.value=todayISO();
   renderAll();
   // Also pre-render LeadFlow so data is ready when user navigates there
@@ -1497,8 +1786,43 @@ function init(){
   updateInsights();
   updateStats();
   setInterval(updateReminders,60000);
+  scheduleAutoBackup();
+  updateBackupUI();
   document.addEventListener('visibilitychange',()=>{if(!document.hidden) updateReminders();});
 }
+
+// Delegate tag suggestion click safely
+document.addEventListener('click',e=>{
+  const btn=e.target.closest('#tag-suggest .tag-chip');
+  if(btn) insertTag(btn.dataset.tag||'');
+});
+
+
+// Delegate entry list actions (robust for string/legacy IDs)
+document.addEventListener('click',e=>{
+  const btn=e.target.closest('[data-entry-action]');
+  if(!btn) return;
+  const id=btn.dataset.entryId||'';
+  const action=btn.dataset.entryAction;
+  if(action==='edit') editEntry(id);
+  if(action==='delete') deleteEntry(id);
+  if(action==='toggle') toggleDone(id);
+});
+
+// Delegate task list actions
+document.addEventListener('click',e=>{
+  const btn=e.target.closest('[data-task-action]');
+  if(!btn) return;
+  const id=btn.dataset.taskId||'';
+  const action=btn.dataset.taskAction;
+  if(action==='edit'){ editEntry(id); switchTab('log'); }
+  if(action==='delete') deleteEntry(id);
+});
+document.addEventListener('change',e=>{
+  const cb=e.target.closest('input[data-task-action="toggle"]');
+  if(!cb) return;
+  toggleDone(cb.dataset.taskId||'');
+});
 
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init,{once:true});
 else init();
