@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>KalpaKuber Intelligence OS v8</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+<link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- ══ HEADER ══ -->
+  <header class="app-header">
+    <div>
+      <h1>🌟 KalpaKuber Intelligence OS</h1>
+      <p class="muted">Personal OS · Lead Pipeline · Client Intelligence — All in one</p>
+    </div>
+    <div class="header-actions">
+      <span id="lastSyncTime" style="font-size:.68rem;color:var(--text-dim);"></span>
+      <button onclick="exportUnifiedJSON()">📤 Export</button>
+      <button onclick="document.getElementById('importFileUnified').click()">📥 Import</button>
+      <input type="file" id="importFileUnified" accept="application/json" hidden onchange="importUnifiedJSON(event)"/>
+    </div>
+  </header>
+
+  <!-- ══ COMMAND CENTRE ══ -->
+  <div id="priority-banner">
+    <div class="banner-header" onclick="toggleBanner()">
+      <span class="banner-title">⚡ Command Centre</span>
+      <span style="font-size:.68rem;color:#94a3b8;" id="banner-toggle-hint">▾ collapse</span>
+    </div>
+    <div class="banner-body" id="banner-body-content">
+      <div id="priority-message-box">
+        <div style="font-size:.68rem;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#93c5fd;margin-bottom:5px;">🧠 Priority Intelligence</div>
+        <div id="priority-msg-text">Loading...</div>
+      </div>
+      <div id="goal-tracker-box">
+        <div class="goal-tracker-title">🎯 Goal Tracker</div>
+        <div id="goal-list-display"></div>
+        <button id="add-goal-btn" onclick="openGoalModal()">+ Manage Goals</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ REMINDERS ══ -->
+  <div id="reminder-panel">
+    <div class="rp-title">🔔 Reminders Due</div>
+    <div id="reminder-list"></div>
+  </div>
+
+  <!-- ══ BI PANEL ══ -->
+  <div id="bi-panel">
+    <div class="bi-header" onclick="toggleBI()">
+      <span>📊 Business Intelligence Dashboard</span>
+      <span style="font-size:.68rem;color:#64748b;" id="bi-toggle-hint">▾ expand</span>
+    </div>
+    <div id="bi-body">
+      <div class="bi-grid" id="bi-kpis" style="margin-bottom:14px;"></div>
+      <div class="bi-section">
+        <h4>30-Day Trend: Energy &amp; Completion</h4>
+        <div id="trend-canvas-wrap"><canvas id="trendChart"></canvas></div>
+        <div class="chart-legend">
+          <span><span class="legend-dot" style="background:#2563eb;"></span>Energy</span>
+          <span><span class="legend-dot" style="background:#10b981;"></span>Tasks Done</span>
+          <span><span class="legend-dot" style="background:#f59e0b;"></span>Review Score</span>
+        </div>
+      </div>
+      <div id="bi-insights"></div>
+    </div>
+  </div>
+
+  <div id="protocol-alert" class="protocol-trigger"></div>
+  <div id="strategic-insights" class="insight-box">✨ <strong>Strategic Nudge:</strong> Loading...</div>
+  <div class="stats-grid" id="stats-panel"></div>
+
+  <!-- ══ MAIN TABS ══ -->
+  <div class="tab-nav" id="main-tab-nav">
+    <button class="tab-btn active" onclick="switchTab('log')">📝 Log</button>
+    <button class="tab-btn" onclick="switchTab('tasks')">✅ Tasks</button>
+    <button class="tab-btn" onclick="switchTab('habits')">🔄 Habits</button>
+    <button class="tab-btn" onclick="switchTab('kb')">🧠 Knowledge</button>
+    <button class="tab-btn" onclick="switchTab('reviews')">🌙 Reviews</button>
+    <button class="tab-btn" onclick="switchTab('timeline')">⏱ Timeline</button>
+    <button class="tab-btn" onclick="switchTab('personal-dash')">📊 Dashboard</button>
+    <button class="tab-btn" onclick="switchTab('leadflow')">🧲 LeadFlow</button>
+    <button class="tab-btn" onclick="switchTab('clients')">👥 Clients</button>
+    <button class="tab-btn" onclick="switchTab('analytics')">📈 Analytics</button>
+    <button class="tab-btn" onclick="switchTab('settings')">⚙️ Settings</button>
+  </div>
+
+  <!-- ══════════════════════════════════ -->
+  <!-- TAB: LOG -->
+  <!-- ══════════════════════════════════ -->
+  <div class="tab-pane active" id="tab-log">
+    <div class="editor">
+      <div class="mood-selector">
+        <span style="font-size:.71rem;font-weight:800;color:#64748b;text-transform:uppercase;">Energy:</span>
+        <button class="mood-btn" data-val="1" onclick="selectMood(1)">😫</button>
+        <button class="mood-btn" data-val="2" onclick="selectMood(2)">😐</button>
+        <button class="mood-btn" data-val="3" onclick="selectMood(3)">😊</button>
+        <button class="mood-btn" data-val="4" onclick="selectMood(4)">🚀</button>
+        <button class="mood-btn" data-val="5" onclick="selectMood(5)">🔥</button>
+      </div>
+      <div style="display:flex;gap:7px;margin-bottom:9px;flex-wrap:wrap;">
+        <button class="btn-win" onclick="insertWin()">🏆 Win</button>
+        <button onclick="insertTemplate()">➕ Reflection</button>
+        <button onclick="insertHabit()">🔄 Habit</button>
+        <button onclick="insertNote()">💡 Insight</button>
+        <button onclick="insertMorning()">☀️ Morning</button>
+        <button onclick="insertClient()">👤 Client Log</button>
+      </div>
+      <div class="editor-wrap">
+        <textarea id="content" placeholder="Log your signal… Use #clientname #p0 #sip #renewal #objection (Ctrl+Enter to save)" oninput="updateEditorMeta(event)"></textarea>
+        <div id="tag-suggest" class="tag-suggest" style="display:none;"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:5px;">
+        <div id="bi-live-hint" style="font-size:.74rem;color:var(--primary);min-height:17px;flex:1;"></div>
+        <div id="editor-meta" style="font-size:.67rem;color:#94a3b8;">0 words</div>
+      </div>
+      <!-- Log → Lead Link display -->
+      <div id="log-lead-links" style="margin-top:6px;min-height:20px;"></div>
+      <div class="controls">
+        <select id="type" onchange="toggleTaskUI()">
+          <option value="Note">Note 📝</option>
+          <option value="Task">Task ✅</option>
+          <option value="Habit">Habit 🔄</option>
+        </select>
+        <span id="taskExtras" style="display:none;">
+          <select id="priority"><option value="Low">🟢 Low</option><option value="Medium">🟡 Medium</option><option value="High">🔴 High</option></select>
+        </span>
+        <input type="datetime-local" id="reminder" title="Set reminder">
+        <button class="btn-primary" onclick="saveEntry()" id="saveBtn">Save Entry</button>
+        <button onclick="resetForm()" style="color:#64748b;background:none;border:none;padding:7px 10px;">Clear</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">
+      <input id="search-log" placeholder="🔍 Search entries…" oninput="renderEntries()" style="flex:1;min-width:180px;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.78rem;">
+      <select id="filter-type" onchange="renderEntries()" style="padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.78rem;">
+        <option value="">All Types</option><option value="Note">Notes</option><option value="Task">Tasks</option><option value="Habit">Habits</option>
+      </select>
+    </div>
+    <div class="entries-list" id="entries-list"></div>
+  </div>
+
+  <!-- ══════════════════════════════════ -->
+  <!-- TAB: TASKS -->
+  <!-- ══════════════════════════════════ -->
+  <div class="tab-pane" id="tab-tasks">
+    <div class="task-filters">
+      <select id="task-filter-priority" onchange="renderTasks()" style="padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.74rem;">
+        <option value="">All Priorities</option><option value="High">🔴 High</option><option value="Medium">🟡 Medium</option><option value="Low">🟢 Low</option>
+      </select>
+      <select id="task-filter-done" onchange="renderTasks()" style="padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.74rem;">
+        <option value="">All Status</option><option value="open">Open</option><option value="done">Done</option>
+      </select>
+    </div>
+    <div id="tasks-list"></div>
+  </div>
+
+  <!-- ══════════════════════════════════ -->
+  <!-- TAB: HABITS -->
+  <!-- ══════════════════════════════════ -->
+  <div class="tab-pane" id="tab-habits">
+    <div id="habits-list"></div>
+    <div style="margin-top:12px;font-size:.76rem;color:var(--text-muted);">Habits are saved from the Log tab using the Habit button. Mark them complete here each day.</div>
+  </div>
+
+  <!-- ══════════════════════════════════ -->
+  <!-- TAB: KNOWLEDGE BASE -->
+  <!-- ══════════════════════════════════ -->
+  <div class="tab-pane" id="tab-kb">
+    <div class="kb-filters">
+      <input id="kb-search" placeholder="🔍 Search knowledge…" oninput="renderKB()" style="flex:1;min-width:180px;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.74rem;">
+    </div>
+    <div id="kb-list"></div>
+  </div>
+
+  <!-- ══════════════════════════════════ -->
+  <!-- TAB: REVIEWS -->
+  <!-- ══════════════════════════════════ -->
+  <div class="tab-pane" id="tab-reviews">
+    <div style="margin-bottom:12px;">
+      <div class="editor">
+        <h3>🌙 Daily Review</h3>
+        <div class="form-grid" style="gap:8px;margin-bottom:10px;">
+          <div class="form-field"><label>Review Score (1-10)</label><input id="review-score" type="number" min="1" max="10" placeholder="8"></div>
+          <div class="form-field"><label>Date</label><input id="review-date" type="date"></div>
+          <div class="form-field full-width"><label>Wins Today</label><textarea id="review-wins" rows="2" style="width:100%;padding:7px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);resize:vertical;"></textarea></div>
+          <div class="form-field full-width"><label>Challenges</label><textarea id="review-challenges" rows="2" style="width:100%;padding:7px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);resize:vertical;"></textarea></div>
+          <div class="form-field full-width"><label>Tomorrow's Focus</label><textarea id="review-tomorrow" rows="2" style="width:100%;padding:7px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);resize:vertical;"></textarea></div>
+        </div>
+        <button class="btn-primary" onclick="saveReview()">Save Review</button>
+      </div>
+    </div>
+    <div id="reviews-list"></div>
+  </div>
+
+  <!-- ══════════════════════════════════ -->
+  <!-- TAB: TIMELINE -->
+  <!-- ══════════════════════════════════ -->
+  <div class="tab-pane" id="tab-timeline">
+    <div id="timeline-list" style="padding:4px 0;"></div>
+  </div>
+
+  <!-- ══════════════════════════════════ -->
+  <!-- TAB: PERSONAL DASHBOARD -->
+  <!-- ══════════════════════════════════ -->
+  <div class="tab-pane" id="tab-personal-dash">
+    <div class="dash-grid" id="personal-kpis"></div>
+    <div class="dash-card" style="margin-bottom:12px;">
+      <h4>📈 Energy Trend (last 30 entries)</h4>
+      <div id="personal-chart-wrap"><canvas id="personalChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════ -->
+  <!-- TAB: LEADFLOW (FULL CRM) -->
+  <!-- ══════════════════════════════════ -->
+  <div class="tab-pane" id="tab-leadflow">
+
+    <!-- LeadFlow Sub-tabs -->
+    <div class="tab-nav" style="margin-bottom:12px;position:relative;top:0;" id="lf-sub-nav">
+      <button class="tab-btn active" onclick="switchLFTab('lf-pipeline')">🧲 Pipeline</button>
+      <button class="tab-btn" onclick="switchLFTab('lf-dashboard')">📊 CRM Dashboard</button>
+      <button class="tab-btn" onclick="switchLFTab('lf-portfolio')">👥 Portfolio</button>
+      <button class="tab-btn" onclick="switchLFTab('lf-referrals')">🌿 Referrals</button>
+      <button class="tab-btn" onclick="switchLFTab('lf-insights')">💡 Insights</button>
+      <button class="tab-btn" onclick="switchLFTab('lf-analytics')">📈 Analytics</button>
+    </div>
+
+    <!-- LF: Pipeline -->
+    <div class="lf-tab-pane active" id="lf-tab-lf-pipeline">
+      <div class="lf-header">
+        <h3>🧲 Lead Pipeline</h3>
+        <div class="lf-actions">
+          <button class="btn-cta" onclick="openLeadModal()">+ New Lead</button>
+          <button onclick="openTargetsModal()">🎯 Targets</button>
+          <button onclick="openSipLogModal()">📈 SIP Log</button>
+          <button onclick="exportLeadCSV()">⬇️ CSV</button>
+        </div>
+      </div>
+      <div id="followUpBanner"></div>
+      <div class="filter-bar">
+        <input id="searchBar" placeholder="🔍 Search leads…" oninput="renderPipeline()">
+        <select id="filterTemp" onchange="renderPipeline()">
+          <option value="">All Temp</option><option value="hot">🔴 Hot</option><option value="warm">🟠 Warm</option><option value="cold">🔵 Cold</option>
+        </select>
+        <select id="filterSource" onchange="renderPipeline()">
+          <option value="">All Sources</option><option>Referral</option><option>Social Media</option><option>Walk-in</option><option>Cold Call</option><option>Event</option><option>Online Ad</option>
+        </select>
+        <label><input type="checkbox" id="filterStale" onchange="renderPipeline()"> Stale only</label>
+      </div>
+      <div class="stage-pills" id="stagePills">
+        <button class="stage-pill active" onclick="scrollToStage('col-prospect',this)">Prospect</button>
+        <button class="stage-pill" onclick="scrollToStage('col-contacted',this)">Contacted</button>
+        <button class="stage-pill" onclick="scrollToStage('col-proposal',this)">Proposal</button>
+        <button class="stage-pill" onclick="scrollToStage('col-potential',this)">Potential</button>
+        <button class="stage-pill" onclick="scrollToStage('col-won',this)">Won</button>
+        <button class="stage-pill" onclick="scrollToStage('col-lost',this)">Lost</button>
+      </div>
+      <div class="pipeline-wrapper" id="pipelineWrapper">
+        <div class="pipeline-board">
+          <div class="column" id="col-prospect" ondragover="allowDrop(event)" ondrop="dropCard(event)">
+            <div class="col-header" style="color:#a78bfa;">Prospect</div>
+            <div class="col-meta" id="meta-col-prospect"></div>
+            <div id="lc-col-prospect"></div>
+          </div>
+          <div class="column" id="col-contacted" ondragover="allowDrop(event)" ondrop="dropCard(event)">
+            <div class="col-header" style="color:#38bdf8;">Contacted</div>
+            <div class="col-meta" id="meta-col-contacted"></div>
+            <div id="lc-col-contacted"></div>
+          </div>
+          <div class="column" id="col-proposal" ondragover="allowDrop(event)" ondrop="dropCard(event)">
+            <div class="col-header" style="color:#f59e0b;">Proposal</div>
+            <div class="col-meta" id="meta-col-proposal"></div>
+            <div id="lc-col-proposal"></div>
+          </div>
+          <div class="column" id="col-potential" ondragover="allowDrop(event)" ondrop="dropCard(event)">
+            <div class="col-header" style="color:#6ee7b7;">Potential</div>
+            <div class="col-meta" id="meta-col-potential"></div>
+            <div id="lc-col-potential"></div>
+          </div>
+          <div class="column" id="col-won" ondragover="allowDrop(event)" ondrop="dropCard(event)">
+            <div class="col-header" style="color:#10b981;">Won ✅</div>
+            <div class="col-meta" id="meta-col-won"></div>
+            <div id="lc-col-won"></div>
+          </div>
+          <div class="column" id="col-lost" ondragover="allowDrop(event)" ondrop="dropCard(event)">
+            <div class="col-header" style="color:#f43f5e;">Lost ❌</div>
+            <div class="col-meta" id="meta-col-lost"></div>
+            <div id="lc-col-lost"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LF: CRM Dashboard -->
+    <div class="lf-tab-pane" id="lf-tab-lf-dashboard">
+      <div id="fyLabel"></div>
+      <div class="lf-dash">
+        <div class="lf-stat">
+          <div class="ls-label">Total AUM</div>
+          <div class="ls-val" id="dash-aum">₹0</div>
+          <div class="ls-sub" id="dash-aum-sub">Set target →</div>
+          <div class="progress-bar-wrap"><div class="progress-bar-fill gold" id="bar-aum" style="width:0%"></div></div>
+          <div class="pct-label"><span id="pct-aum">0%</span> · <span id="sub-aum-left"></span></div>
+          <div class="ls-target" id="sub-aum-target"></div>
+        </div>
+        <div class="lf-stat">
+          <div class="ls-label">SIP Book</div>
+          <div class="ls-val" id="dash-sip">₹0/mo</div>
+          <div class="ls-sub" id="dash-sip-sub">Set target →</div>
+          <div class="progress-bar-wrap"><div class="progress-bar-fill teal" id="bar-sip" style="width:0%"></div></div>
+          <div class="pct-label"><span id="pct-sip">0%</span> · <span id="sub-sip-left"></span></div>
+          <div class="ls-target" id="sub-sip-target"></div>
+        </div>
+        <div class="lf-stat">
+          <div class="ls-label">Trail Income</div>
+          <div class="ls-val" id="dash-trail">₹0</div>
+          <div class="ls-sub" id="dash-trail-sub">Rate: 0.75%</div>
+          <div class="progress-bar-wrap"><div class="progress-bar-fill" id="bar-trail" style="width:0%"></div></div>
+          <div class="pct-label"><span id="pct-trail">0%</span> · <span id="sub-trail-left"></span></div>
+          <div class="ls-target" id="sub-trail-target"></div>
+        </div>
+        <div class="lf-stat">
+          <div class="ls-label">Ins. Premium</div>
+          <div class="ls-val" id="dash-ins">₹0</div>
+          <div class="ls-sub" id="dash-ins-sub">Commission: ₹0/yr</div>
+        </div>
+      </div>
+      <!-- Trail breakdown -->
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:12px;">
+        <div style="font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px;">Trail Income Breakdown</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;font-size:.74rem;">
+          <div><span style="color:var(--text-muted);">MF Rate:</span> <span id="trail-mf-rate" style="font-weight:700;font-family:'DM Mono',monospace;"></span></div>
+          <div><span style="color:var(--text-muted);">MF Monthly:</span> <span id="trail-mf-monthly" style="font-weight:700;font-family:'DM Mono',monospace;"></span></div>
+          <div><span style="color:var(--text-muted);">MF Annual:</span> <span id="trail-mf-annual" style="font-weight:700;font-family:'DM Mono',monospace;"></span></div>
+          <div><span style="color:var(--text-muted);">Ins Comm:</span> <span id="trail-ins-comm" style="font-weight:700;font-family:'DM Mono',monospace;"></span></div>
+          <div><span style="color:var(--text-muted);">Total:</span> <span id="trail-total" style="font-weight:700;color:var(--accent-green);font-family:'DM Mono',monospace;"></span></div>
+        </div>
+      </div>
+      <!-- SIP Log Widget -->
+      <div class="sip-widget-box">
+        <div class="sip-widget-title">📈 SIP Change Log <button onclick="openSipLogModal()" style="background:none;border:none;color:var(--primary);font-size:.7rem;cursor:pointer;margin-left:6px;">+ Add / View All</button></div>
+        <div id="sipLogWidget"></div>
+        <div id="sipLogNet"></div>
+      </div>
+    </div>
+
+    <!-- LF: Portfolio -->
+    <div class="lf-tab-pane" id="lf-tab-lf-portfolio">
+      <div style="margin-bottom:10px;">
+        <input id="portfolio-search" placeholder="🔍 Filter clients…" oninput="renderPortfolioFiltered()" style="padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.78rem;width:100%;max-width:320px;">
+      </div>
+      <div class="portfolio-grid" id="portfolioGrid"></div>
+    </div>
+
+    <!-- LF: Referrals -->
+    <div class="lf-tab-pane" id="lf-tab-lf-referrals">
+      <h3 style="font-size:.9rem;font-weight:800;margin-bottom:10px;">🌿 Referral Network</h3>
+      <div class="ref-stats-row" id="refStatsRow"></div>
+      <div id="refTreeContent"></div>
+    </div>
+
+    <!-- LF: Insights -->
+    <div class="lf-tab-pane" id="lf-tab-lf-insights">
+      <div class="insights-box">
+        <h4>💡 Pipeline Insights</h4>
+        <div id="insightItems"></div>
+      </div>
+    </div>
+
+    <!-- LF: Analytics -->
+    <div class="lf-tab-pane" id="lf-tab-lf-analytics">
+      <div class="analytics-section">
+        <h3>📊 Pipeline Analytics</h3>
+        <div class="stat-boxes">
+          <div class="stat-box"><div class="sb-val" id="stat-pipe">₹0</div><div class="sb-label">Live Pipeline</div></div>
+          <div class="stat-box"><div class="sb-val" id="stat-weighted">₹0</div><div class="sb-label">Weighted Pipeline</div></div>
+          <div class="stat-box"><div class="sb-val" id="stat-won-rev">₹0</div><div class="sb-label">Won Revenue</div></div>
+          <div class="stat-box"><div class="sb-val" id="stat-rate">0%</div><div class="sb-label">Win Rate</div></div>
+          <div class="stat-box"><div class="sb-val" id="stat-velocity">0 Days</div><div class="sb-label">Deal Velocity</div></div>
+          <div class="stat-box"><div class="sb-val" id="stat-avg">₹0</div><div class="sb-label">Avg Deal Size</div></div>
+          <div class="stat-box"><div class="sb-val" id="stat-loss">—</div><div class="sb-label">Top Loss Reason</div></div>
+        </div>
+        <div class="analytics-grid">
+          <div class="analytics-card">
+            <h4>Conversion Funnel</h4>
+            <div class="funnel-visual" id="funnelVisual"></div>
+          </div>
+          <div class="analytics-card">
+            <h4>Monthly Won Revenue</h4>
+            <div id="monthlyChart"></div>
+          </div>
+        </div>
+        <div class="analytics-grid">
+          <div class="analytics-card">
+            <h4>Source Performance</h4>
+            <table id="sourceTable">
+              <thead><tr><th>Source</th><th>Win Rate</th><th>Revenue</th><th>Wtd Value</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="analytics-card">
+            <h4>Stage Aging</h4>
+            <table id="agingTable">
+              <thead><tr><th>Stage</th><th>Avg Days</th><th>Limit</th><th>Health</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="analytics-grid">
+          <div class="analytics-card">
+            <h4>Product Mix (Won)</h4>
+            <table id="productMixTable">
+              <thead><tr><th>Product</th><th>Count</th><th>Revenue</th><th>Avg Deal</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="analytics-card">
+            <h4>Temperature vs Win Rate</h4>
+            <table id="tempWinTable">
+              <thead><tr><th>Temp</th><th>Total</th><th>Won</th><th>Win%</th><th>Revenue</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div><!-- end leadflow tab -->
+
+  <!-- ══════════════════════════════════ -->
+  <!-- TAB: CLIENTS -->
+  <!-- ══════════════════════════════════ -->
+  <div class="tab-pane" id="tab-clients">
+    <div style="margin-bottom:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+      <input id="clients-search" placeholder="🔍 Search clients by name or ID…" oninput="renderClientsTab()" style="flex:1;min-width:200px;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.78rem;">
+    </div>
+    <div id="clients-tab-list"></div>
+  </div>
+
+  <!-- ══════════════════════════════════ -->
+  <!-- TAB: ANALYTICS (Personal) -->
+  <!-- ══════════════════════════════════ -->
+  <div class="tab-pane" id="tab-analytics">
+    <div id="personal-analytics"></div>
+  </div>
+
+  <!-- ══════════════════════════════════ -->
+  <!-- TAB: SETTINGS -->
+  <!-- ══════════════════════════════════ -->
+  <div class="tab-pane" id="tab-settings">
+    <div class="settings-section">
+      <h3>⚙️ Data &amp; Sync</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+        <button class="btn-primary" onclick="exportUnifiedJSON()">📤 Export All Data (JSON)</button>
+        <button onclick="document.getElementById('importFileUnified').click()" style="padding:7px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.78rem;font-weight:700;">📥 Import JSON</button>
+        <button onclick="exportLeadCSV()" style="padding:7px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.78rem;font-weight:700;">⬇️ Export Leads CSV</button>
+      </div>
+      <div class="sync-bar">
+        <div class="sync-dot" id="syncDot"></div>
+        <span id="syncStatusText">LocalStorage active — data saves automatically</span>
+        <span id="lastSyncTime2" style="margin-left:auto;font-family:'DM Mono',monospace;"></span>
+      </div>
+    </div>
+    <div class="settings-section">
+      <h3>🎯 LeadFlow Targets</h3>
+      <button class="btn-primary" onclick="openTargetsModal()" style="margin-bottom:8px;">Edit Targets</button>
+      <div id="targets-summary" style="font-size:.76rem;color:var(--text-muted);"></div>
+    </div>
+    <div class="settings-section">
+      <h3>📋 Audit Log</h3>
+      <div id="audit-log-display"></div>
+    </div>
+    <div class="settings-section">
+      <h3>💾 Storage Info</h3>
+      <div id="storage-info" style="font-size:.76rem;color:var(--text-muted);"></div>
+    </div>
+  </div>
+
+</div><!-- end app-shell -->
+
+<!-- ═══════════════════════════════════════════
+     MODALS
+═══════════════════════════════════════════ -->
+
+<!-- Lead Modal -->
+<div class="modal-overlay" id="leadModal">
+  <div class="modal-box wide">
+    <button class="modal-close" onclick="closeLeadModal()">✕</button>
+    <div class="modal-title" id="leadModalTitle">New Lead</div>
+    <input type="hidden" id="editLeadId">
+    <div class="form-section">Client Details</div>
+    <div class="form-grid">
+      <div class="form-field">
+        <label>Client Name *</label>
+        <input id="clientName" placeholder="Full name" required>
+      </div>
+      <div class="form-field">
+        <label>Client ID (auto-assigned)</label>
+        <div id="clientIdDisplay" class="client-id-badge" style="margin-top:4px;">—</div>
+      </div>
+      <div class="form-field">
+        <label>Phone</label>
+        <input id="phone" placeholder="10-digit mobile">
+      </div>
+      <div class="form-field">
+        <label>Email</label>
+        <input id="email" type="email" placeholder="email@domain.com">
+      </div>
+      <div class="form-field">
+        <label>Referred By</label>
+        <input id="referredBy" list="clientNamesList" placeholder="Referrer name">
+        <datalist id="clientNamesList"></datalist>
+      </div>
+      <div class="form-field">
+        <label>Lead Temperature</label>
+        <select id="temp"><option value="warm">🟠 Warm</option><option value="hot">🔴 Hot</option><option value="cold">🔵 Cold</option></select>
+      </div>
+      <div class="form-field">
+        <label>Source Channel</label>
+        <select id="source"><option>Referral</option><option>Social Media</option><option>Walk-in</option><option>Cold Call</option><option>Event</option><option>Online Ad</option></select>
+      </div>
+      <div class="form-field">
+        <label>Revenue Type</label>
+        <select id="revType"><option>Trail</option><option>Commission</option><option>Fee</option></select>
+      </div>
+      <div class="form-field">
+        <label>Next Action Date</label>
+        <input id="nextAction" type="date">
+      </div>
+    </div>
+    <div class="form-section">Products of Interest</div>
+    <div class="product-check-grid" id="productCheckboxes">
+      <label class="product-check-item"><input type="checkbox" value="MF-SIP" onchange="toggleProductValue('MF-SIP',this.checked)"> 📈 MF-SIP</label>
+      <label class="product-check-item"><input type="checkbox" value="MF-Lumpsum" onchange="toggleProductValue('MF-Lumpsum',this.checked)"> 💰 MF-Lumpsum</label>
+      <label class="product-check-item"><input type="checkbox" value="Life Insurance" onchange="toggleProductValue('Life Insurance',this.checked)"> 🛡️ Life Insurance</label>
+      <label class="product-check-item"><input type="checkbox" value="Health Insurance" onchange="toggleProductValue('Health Insurance',this.checked)"> 🏥 Health Insurance</label>
+    </div>
+    <div id="productValues"></div>
+    <div class="warning-msg" id="noProductWarning">⚠️ Please select at least one product.</div>
+    <div class="form-section">Notes</div>
+    <div class="form-field full-width">
+      <textarea id="leadNotes" rows="3" placeholder="Initial note or context…" style="width:100%;padding:7px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);resize:vertical;"></textarea>
+    </div>
+    <div id="wonSection" style="display:none;">
+      <div class="form-section">Won Details</div>
+      <div class="form-field"><label>Actual Revenue (₹)</label><input id="actualValue" type="number" min="0" placeholder="0"></div>
+    </div>
+    <div id="lostSection" style="display:none;">
+      <div class="form-section">Loss Details</div>
+      <div class="form-field"><label>Loss Reason</label>
+        <select id="lossReason"><option value="">Select reason</option><option>Price</option><option>Competition</option><option>No Need</option><option>Timing</option><option>No Decision</option><option>Other</option></select>
+      </div>
+    </div>
+    <div class="form-btns">
+      <button class="btn btn-primary" onclick="submitLeadForm()">Save Lead</button>
+      <button class="btn btn-secondary" onclick="closeLeadModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Targets Modal -->
+<div class="modal-overlay" id="targetsModal">
+  <div class="modal-box">
+    <button class="modal-close" onclick="document.getElementById('targetsModal').style.display='none'">✕</button>
+    <div class="modal-title">🎯 Targets &amp; Settings</div>
+    <div class="targets-section">Identity</div>
+    <div class="targets-grid">
+      <div class="targets-field"><label>Your Name</label><input id="t-name" placeholder="Your name"></div>
+      <div class="targets-field"><label>FY Start Month (0=Jan, 3=Apr)</label><input id="t-fy-start" type="number" min="0" max="11" value="3"></div>
+    </div>
+    <div class="targets-section">AUM &amp; SIP</div>
+    <div class="targets-grid">
+      <div class="targets-field"><label>Current AUM (₹)</label><input id="t-aum-current" type="number" min="0"></div>
+      <div class="targets-field"><label>AUM Target (₹)</label><input id="t-aum-target" type="number" min="0"></div>
+      <div class="targets-field"><label>SIP Book Current (₹/mo)</label><input id="t-sip-current" type="number" min="0"></div>
+      <div class="targets-field"><label>SIP Book Target (₹/mo)</label><input id="t-sip-target" type="number" min="0"></div>
+    </div>
+    <div class="targets-section">Trail &amp; Insurance</div>
+    <div class="targets-grid">
+      <div class="targets-field"><label>Trail Rate (% p.a.)</label><input id="t-trail-rate" type="number" step="0.01" value="0.75"></div>
+      <div class="targets-field"><label>Trail Income Target (₹/yr)</label><input id="t-trail-target" type="number" min="0"></div>
+      <div class="targets-field"><label>Insurance Premium Under Mgmt (₹)</label><input id="t-ins-premium" type="number" min="0"></div>
+      <div class="targets-field"><label>Insurance Commission Rate (%)</label><input id="t-ins-rate" type="number" step="0.1" value="5"></div>
+    </div>
+    <div class="targets-section">Stale Lead Thresholds (days)</div>
+    <div class="targets-grid">
+      <div class="targets-field"><label>Prospect</label><input id="t-stale-prospect" type="number" min="1" value="5"></div>
+      <div class="targets-field"><label>Contacted</label><input id="t-stale-contacted" type="number" min="1" value="7"></div>
+      <div class="targets-field"><label>Proposal</label><input id="t-stale-proposal" type="number" min="1" value="10"></div>
+      <div class="targets-field"><label>Potential</label><input id="t-stale-potential" type="number" min="1" value="21"></div>
+    </div>
+    <div class="form-btns">
+      <button class="btn btn-primary" onclick="saveTargets()">Save Targets</button>
+      <button class="btn btn-secondary" onclick="document.getElementById('targetsModal').style.display='none'">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- SIP Log Modal -->
+<div class="modal-overlay" id="sipLogModal">
+  <div class="modal-box">
+    <button class="modal-close" onclick="document.getElementById('sipLogModal').style.display='none'">✕</button>
+    <div class="modal-title">📈 SIP Change Log</div>
+    <div style="background:var(--surface2);border-radius:8px;padding:10px 12px;margin-bottom:12px;text-align:center;">
+      <div style="font-size:1.25rem;font-weight:800;" id="sipLogTotalModal">₹0/mo</div>
+      <div style="font-size:.72rem;color:var(--text-muted);" id="sipVsTarget">No target set</div>
+    </div>
+    <div class="form-section">Add Entry</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:10px;">
+      <div class="form-field"><label>Date</label><input id="sl-date" type="date"></div>
+      <div class="form-field"><label>Client</label><input id="sl-client" list="clientNamesList2" placeholder="Client name"><datalist id="clientNamesList2"></datalist></div>
+      <div class="form-field"><label>Type</label>
+        <select id="sl-type">
+          <option value="add">➕ New SIP</option>
+          <option value="top">⬆️ Top-Up</option>
+          <option value="stop">➖ Stopped</option>
+          <option value="reduce">⬇️ Reduced</option>
+        </select>
+      </div>
+      <div class="form-field"><label>Amount (₹/mo)</label><input id="sl-amount" type="number" min="0" placeholder="5000"></div>
+      <div class="form-field" style="grid-column:1/-1"><label>Note</label><input id="sl-note" placeholder="Optional note"></div>
+    </div>
+    <button class="btn btn-primary" onclick="addSipLogEntry()">Add Entry</button>
+    <div class="form-section" style="margin-top:14px;">All Entries</div>
+    <div id="sipLogFull" style="max-height:260px;overflow-y:auto;"></div>
+  </div>
+</div>
+
+<!-- Stage Move: Lost Modal -->
+<div class="modal-overlay" id="lostModal">
+  <div class="modal-box" style="max-width:380px;">
+    <div class="modal-title">❌ Mark as Lost</div>
+    <div class="form-field" style="margin-bottom:12px;">
+      <label>Loss Reason</label>
+      <select id="lostModalReason" style="padding:7px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);width:100%;">
+        <option value="">Select reason</option><option>Price</option><option>Competition</option><option>No Need</option><option>Timing</option><option>No Decision</option><option>Other</option>
+      </select>
+    </div>
+    <div class="form-btns">
+      <button class="btn btn-danger" onclick="confirmLost()">Confirm Lost</button>
+      <button class="btn btn-secondary" onclick="cancelStageMove()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Stage Move: Won Modal -->
+<div class="modal-overlay" id="wonModal">
+  <div class="modal-box" style="max-width:380px;">
+    <div class="modal-title">✅ Mark as Won</div>
+    <div class="form-field" style="margin-bottom:12px;">
+      <label>Actual Revenue (₹)</label>
+      <input id="wonModalRevenue" type="number" min="0" placeholder="0" style="padding:7px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);width:100%;">
+    </div>
+    <div class="form-btns">
+      <button class="btn btn-success" onclick="confirmWon()">Confirm Won</button>
+      <button class="btn btn-secondary" onclick="cancelStageMove()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Product Won Modal -->
+<div class="modal-overlay" id="prodWonModal">
+  <div class="modal-box" style="max-width:400px;">
+    <div class="modal-title">✅ Product Won</div>
+    <div id="prodWonDesc" style="font-size:.8rem;color:var(--text-muted);margin-bottom:12px;"></div>
+    <div class="form-field" style="margin-bottom:8px;">
+      <label>Actual Revenue (₹)</label>
+      <input id="prodWonRevenue" type="number" min="0" placeholder="0" style="padding:7px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);width:100%;">
+    </div>
+    <div id="prodWonSipGroup" style="margin-bottom:8px;">
+      <label style="display:flex;align-items:center;gap:8px;font-size:.78rem;cursor:pointer;">
+        <input type="checkbox" id="prodWonAddSip"> Add to SIP Log
+      </label>
+    </div>
+    <div id="prodWonSipAmtGroup" style="display:none;margin-bottom:8px;">
+      <div class="form-field"><label>Monthly SIP Amount (₹)</label><input id="prodWonSipAmt" type="number" min="0" style="padding:7px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);width:100%;"></div>
+    </div>
+    <div class="form-btns">
+      <button class="btn btn-success" onclick="confirmProdWon()">Confirm Won</button>
+      <button class="btn btn-secondary" onclick="cancelProdAction()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Client Detail Modal -->
+<div class="modal-overlay" id="clientModal">
+  <div class="modal-box wide">
+    <button class="modal-close" onclick="document.getElementById('clientModal').style.display='none'">✕</button>
+    <div id="clientModalContent"></div>
+  </div>
+</div>
+
+<!-- Lead Info Modal -->
+<div class="modal-overlay" id="leadInfoModal">
+  <div class="modal-box">
+    <button class="modal-close" onclick="document.getElementById('leadInfoModal').style.display='none'">✕</button>
+    <div id="leadInfoContent"></div>
+  </div>
+</div>
+
+<!-- Goal Modal -->
+<div class="modal-overlay" id="goalModal">
+  <div class="modal-box" style="max-width:460px;">
+    <button class="modal-close" onclick="document.getElementById('goalModal').style.display='none'">✕</button>
+    <div class="modal-title">🎯 Goals</div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <input id="new-goal-text" placeholder="New goal…" style="flex:1;padding:7px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);" onkeydown="if(event.key==='Enter')addGoal()">
+      <button class="btn-primary" onclick="addGoal()">Add</button>
+    </div>
+    <div id="goals-modal-list"></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
