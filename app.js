@@ -782,7 +782,14 @@ function logHabit(name,checked){
 function renderKB(){
   const search=($('kb-search')?.value||'').toLowerCase();
   const list=$('kb-list'); if(!list) return;
-  const kbEntries=entries.filter(e=>e.type==='Note'&&(e.text.startsWith('💡')||e.text.includes('INSIGHT')||e.tags?.length>0));
+  const kbEntries=entries.filter(e=>e.type==='Note'&&(
+    e.text.startsWith('💡') || 
+    e.text.includes('INSIGHT') || 
+    e.text.startsWith('📖 STUDY') ||
+    e.sourceType==='knowledge-log' ||
+    e.sourceType==='insight-tracker' ||
+    (e.tags && e.tags.length>0)
+  ));
   const filtered=kbEntries.filter(e=>!search||e.text.toLowerCase().includes(search));
   if(!filtered.length){list.innerHTML='<div style="text-align:center;padding:24px;color:var(--text-dim);">No knowledge entries. Add notes with 💡 INSIGHT prefix.</div>';return;}
   list.innerHTML=filtered.map(e=>`
@@ -805,7 +812,9 @@ function saveReview(){
   const tomorrow=$('review-tomorrow').value.trim();
   if(!score){alert('Please enter a review score.');return;}
   reviews.unshift({id:genId(),score,date,wins,challenges,tomorrow});
-  saveAll();renderReviews();
+  const newEntry={id:'rev-'+Date.now(),text:`🌗 REVIEW: Wins — ${wins||'-'} | Challenges — ${challenges||'-'}`,type:'Note',tags:['review'],sourceType:'daily-review',date:new Date().toISOString(),dateShort:fmtDate(Date.now()),energy:3,done:false,priority:null,reminder:null,linkedLeadId:'',linkedLeadIds:[],linkedTaskId:null};
+  entries.unshift(newEntry);
+  saveAll();renderEntries();renderReviews();
   $('review-score').value='';$('review-wins').value='';$('review-challenges').value='';$('review-tomorrow').value='';
 }
 
@@ -1941,13 +1950,18 @@ function addCall(){
   const input=$('dpCallNameInput');
   const name=sanitize(input?.value||'');
   if(!name) return;
-  dtState.calls.push({id:Date.now(),name,done:false,channel:dtState.newContactChannel||'wa'});
+  const matched=leads.find(l=>String(l.name||'').trim().toLowerCase()===name.toLowerCase());
+  dtState.calls.push({id:Date.now(),name,done:false,channel:dtState.newContactChannel||'wa',leadId:matched?matched.id:''});
   if(input) input.value='';
   saveAll();
   renderCalls();
 }
 function toggleCall(id){
-  dtState.calls=dtState.calls.map(c=>String(c.id)===String(id)?{...c,done:!c.done}:c);
+  let toggled=null;
+  dtState.calls=dtState.calls.map(c=>{ if(String(c.id)!==String(id)) return c; toggled={...c,done:!c.done}; return toggled;});
+  if(toggled?.done&&toggled.leadId){
+    leads=leads.map(l=>{ if(l.id!==toggled.leadId) return l; const hist=[...(l.history||[])]; hist.unshift({date:fmtDate(Date.now()),msg:'📞 Call logged from Daily Pulse'}); return {...l,history:hist,lastUpdated:Date.now()}; });
+  }
   saveAll();
   renderCalls();
 }
@@ -1966,7 +1980,7 @@ function renderCalls(){
   if(statEl) statEl.textContent=`${done}/${calls.length} completed`;
   if(emptyEl) emptyEl.style.display=calls.length?'none':'';
   if(!listEl) return;
-  listEl.innerHTML=calls.map(c=>`<div class="dp-call-item ${c.done?'called':''}" onclick="toggleCall('${c.id}')"><div style="flex:1;"><div class="dp-call-name">${escHtml(c.name)}</div><span class="${c.channel==='wa'?'badge-wa':'badge-call'}">${c.channel==='wa'?'💬 WA':'📞 Call'}</span></div><div style="display:flex;align-items:center;gap:8px;"><span>${c.done?'Done':'Pending'}</span><button class="out-btn" onclick="deleteCall('${c.id}',event)">✕</button></div></div>`).join('');
+  listEl.innerHTML=calls.map(c=>`<div class="dp-call-item ${c.done?'called':''}" onclick="toggleCall('${c.id}')"><div style="flex:1;"><div class="dp-call-name">${escHtml(c.name)} ${c.leadId?`<span class="log-link-badge" onclick="event.stopPropagation();jumpToLead('${escHtml(c.leadId)}')" title="View in LeadFlow">🔗</span>`:''}</div><span class="${c.channel==='wa'?'badge-wa':'badge-call'}">${c.channel==='wa'?'💬 WA':'📞 Call'}</span></div><div style="display:flex;align-items:center;gap:8px;"><span class="dp-call-status">${c.done?'Done':'Pending'}</span><button class="out-btn" onclick="deleteCall('${c.id}',event)">✕</button></div></div>`).join('');
 }
 
 function changeOutput(key,delta){
@@ -2051,20 +2065,16 @@ function updateScoreDisplay(){
 
 function saveBig3(){
   dtState.big3=[sanitize($('b3_1')?.value||''),sanitize($('b3_2')?.value||''),sanitize($('b3_3')?.value||'')];
-  saveAll();
-  const raw=localStorage.getItem(PS_KEY)||'[]';
-  let logs=[];
-  try{logs=JSON.parse(raw);}catch(e){logs=[];}
   const priorities=['High','Medium','Low'];
   const tomorrow9=new Date(); tomorrow9.setDate(tomorrow9.getDate()+1); tomorrow9.setHours(9,0,0,0);
   dtState.big3.forEach((txt,i)=>{
     if(!txt) return;
-    const dup=logs.some(e=>String(e.type)==='Task'&&String(e.text||'').trim().toLowerCase()===txt.toLowerCase());
+    const dup=entries.some(e=>String(e.type)==='Task'&&String(e.text||'').trim().toLowerCase()===txt.toLowerCase());
     if(dup) return;
-    logs.unshift({id:genId(),text:txt,type:'Task',priority:priorities[i],reminder:new Date(tomorrow9.getTime()+i*3600000).toISOString().slice(0,16),done:false,tags:['big3'],sourceType:'big3-tracker',date:new Date().toISOString(),dateShort:fmtDate(Date.now())});
+    entries.unshift({id:'b3-'+Date.now()+'-'+i,text:txt,type:'Task',priority:priorities[i],reminder:new Date(tomorrow9.getTime()+i*3600000).toISOString().slice(0,16),energy:3,done:false,tags:['big3'],linkedLeadId:'',linkedLeadIds:[],linkedTaskId:null,sourceType:'big3-tracker',date:new Date().toISOString(),dateShort:fmtDate(Date.now())});
   });
-  localStorage.setItem(PS_KEY,JSON.stringify(logs));
-  entries=logs.map(validateEntry).filter(Boolean);
+  saveAll();
+  renderEntries();
   const ok=$('b3SavedMsg'); if(ok){ok.textContent='Big 3 saved and added to PowerLog tasks.';setTimeout(()=>ok.textContent='',2200);} 
 }
 function restoreBig3(){
@@ -2090,18 +2100,27 @@ function setFollowupTab(tab){
 function setStudyProduct(p){
   dtState.studyProduct=sanitize(p||'general');
   saveAll();
-  ['life','health','mfd','general'].forEach(k=>{const el=$('sptab-'+k); if(el) el.classList.toggle('active',dtState.studyProduct===k);});
+  ['life','health','mfd','general'].forEach(k=>{const el=$('sptab-'+k); if(!el) return; el.classList.remove('active','active-life','active-health','active-mfd','active-general'); if(dtState.studyProduct===k){el.classList.add('active','active-'+k);} });
 }
 function saveStudyEntry(){
   const input=$('dpStudyInput');
-  const text=sanitize(input?.value||'');
+  const rawText=input?.value||'';
+  const text=sanitize(rawText);
   if(!text) return;
-  const item={id:Date.now(),date:todayISO(),product:dtState.studyProduct||'general',text};
+  const product=dtState.studyProduct||'general';
+  const item={id:Date.now(),date:todayISO(),product,text};
   knowledgeLog.unshift(item); if(knowledgeLog.length>200) knowledgeLog=knowledgeLog.slice(0,200);
   saveKnowledgeLog();
-  entries.unshift(validateEntry({id:genId(),type:'Note',text:`📘 STUDY (${item.product}): ${text}`,tags:['knowledge','study'],sourceType:'daily-pulse-study',date:new Date().toISOString(),dateShort:fmtDate(Date.now())}));
+
+  const linked=resolveLinkedLeadIds(rawText,'');
+  const newEntry={id:'study-'+Date.now(),text:'📖 STUDY ['+product+']: '+text,type:'Note',tags:['knowledge','study',product],sourceType:'knowledge-log',date:new Date().toISOString(),dateShort:fmtDate(Date.now()),energy:3,done:false,priority:null,reminder:null,linkedLeadId:linked.ids[0]||'',linkedLeadIds:linked.ids||[],linkedTaskId:null};
+  entries.unshift(newEntry);
+  if(linked.ids.length){
+    leads=leads.map(l=>{if(!linked.ids.includes(l.id)) return l; const hist=[...(l.history||[])]; hist.unshift({date:fmtDate(Date.now()),msg:'💡 Linked from Daily Pulse log'}); return {...l,history:hist,lastUpdated:Date.now()};});
+  }
   dtState.studyDone=true;
   saveAll();
+  renderEntries();
   if(input) input.value='';
   renderStudyLog();
   if(typeof showToast==='function') showToast('Study entry saved');
@@ -2113,13 +2132,21 @@ function renderStudyLog(){
 
 function saveInsight(){
   const input=$('dpInsightField');
-  const text=sanitize(input?.value||'');
+  const rawText=input?.value||'';
+  const text=sanitize(rawText);
   if(!text) return;
   const item={id:Date.now(),date:todayISO(),text};
   insightLog.unshift(item); if(insightLog.length>300) insightLog=insightLog.slice(0,300);
   saveInsightLog();
-  entries.unshift(validateEntry({id:genId(),type:'Note',text:`💡 INSIGHT: ${text}`,tags:['insight'],sourceType:'daily-pulse-insight',date:new Date().toISOString(),dateShort:fmtDate(Date.now())}));
+
+  const linked=resolveLinkedLeadIds(rawText,'');
+  const newEntry={id:'ins-'+Date.now(),text:'💡 INSIGHT: '+text,type:'Note',tags:['insight'],sourceType:'insight-tracker',date:new Date().toISOString(),dateShort:fmtDate(Date.now()),energy:3,done:false,priority:null,reminder:null,linkedLeadId:linked.ids[0]||'',linkedLeadIds:linked.ids||[],linkedTaskId:null};
+  entries.unshift(newEntry);
+  if(linked.ids.length){
+    leads=leads.map(l=>{if(!linked.ids.includes(l.id)) return l; const hist=[...(l.history||[])]; hist.unshift({date:fmtDate(Date.now()),msg:'💡 Linked from Daily Pulse log'}); return {...l,history:hist,lastUpdated:Date.now()};});
+  }
   saveAll();
+  renderEntries();
   if(input) input.value='';
   renderInsightPrev();
   if(typeof showToast==='function') showToast('Insight saved');
@@ -2134,6 +2161,15 @@ function dailyPulseSetReview(field,value){
   dtState[field]=sanitize(value);
   dailyPulseRecalculateProgress();
   saveAll();
+}
+
+function dailyPulseSaveReview(){
+  const wins=sanitize(dtState.reviewWins||'');
+  const challenges=sanitize(dtState.reviewChallenges||'');
+  if(!wins && !challenges) return;
+  entries.unshift({id:'dpr-'+Date.now(),text:'🌗 REVIEW: Wins — '+(wins||'-')+' | Challenges — '+(challenges||'-'),type:'Note',tags:['review'],sourceType:'daily-review',date:new Date().toISOString(),dateShort:fmtDate(Date.now()),energy:3,done:false,priority:null,reminder:null,linkedLeadId:'',linkedLeadIds:[],linkedTaskId:null});
+  saveAll();
+  renderEntries();
 }
 
 function dailyPulseAddTask(zone){
@@ -2224,6 +2260,7 @@ function renderDailyPulse(){
   host.innerHTML=`<div class="daily-pulse-grid">
     <section class="dp-overview">
       <div class="dp-ring" style="--progress:${dtState.progress};"><div><strong>${dtState.progress}%</strong><span>Daily Completion</span></div></div>
+      <button onclick="switchTab('log');setTimeout(()=>{const c=$('content');if(c)c.focus();},120)">📝 Quick Log to PowerLog</button>
     </section>
 
     <section class="dp-zone">
@@ -2302,7 +2339,7 @@ function renderDailyPulse(){
 
     <section class="dp-zone"><h3>💡 Insight of the Day</h3><textarea id="dpInsightField" placeholder="What is your key insight or lesson from today?"></textarea><button onclick="saveInsight()">Save Insight</button><div id="dpInsightPrev"></div></section>
 
-    <section class="dp-zone"><h3>🌗 Day Score + Review</h3><div id="scoreTrack" class="score-track"></div><div>Score: <span id="scoreCurrent">0</span> · <span id="scoreMsg"></span></div><div class="dp-review"><textarea placeholder="Wins captured today..." oninput="dailyPulseSetReview('reviewWins',this.value)">${escHtml(dtState.reviewWins)}</textarea><textarea placeholder="Challenges and blockers..." oninput="dailyPulseSetReview('reviewChallenges',this.value)">${escHtml(dtState.reviewChallenges)}</textarea></div></section>
+    <section class="dp-zone"><h3>🌗 Day Score + Review</h3><div id="scoreTrack" class="score-track"></div><div>Score: <span id="scoreCurrent">0</span> · <span id="scoreMsg"></span></div><div class="dp-review"><textarea placeholder="Wins captured today..." oninput="dailyPulseSetReview('reviewWins',this.value)">${escHtml(dtState.reviewWins)}</textarea><textarea placeholder="Challenges and blockers..." oninput="dailyPulseSetReview('reviewChallenges',this.value)">${escHtml(dtState.reviewChallenges)}</textarea></div><button onclick="dailyPulseSaveReview()">Save Review to PowerLog</button></section>
 
     <section class="dp-guide long"><h3>Advisor Workflow Guidance</h3><div class="dp-guide-list"><details class="dp-guide-card" open><summary>Morning Setup</summary><p>Start with clarity. Review today's non-negotiables, check follow-up commitments, scan pending service issues, and set one primary conversion objective.</p><ul><li>Review your top 5 priority leads and note exact next action.</li><li>Prepare your market broadcast draft before noon.</li><li>Block your calendar for Hunter, Guardian, and Closer windows.</li><li>Select 3 clients that need confidence-building communication.</li></ul></details><details class="dp-guide-card"><summary>Hunter Mode</summary><p>This is pure pipeline building. Prospect, reconnect and generate new conversations with consistency.</p><ul><li>Send 5 personalized WhatsApp nudges.</li><li>Reconnect with old leads using contextual hooks.</li><li>Add at least 1 new prospect into LeadFlow with clear stage.</li></ul></details><details class="dp-guide-card"><summary>Guardian Mode</summary><p>Protect trust and retention. Service quality compounds referrals and long-term AUM.</p><ul><li>Check pending queries and resolve before market close.</li><li>Send reassurance notes during volatility in calm language.</li><li>Update portfolio notes and next review dates.</li></ul></details><details class="dp-guide-card"><summary>Closer Mode</summary><p>Move warm intent into committed action through structured conversations.</p><ul><li>Call warm leads with clear agenda and outcome target.</li><li>Schedule meetings and document objections in PowerLog.</li><li>Discuss SIP discipline and portfolio strategy with evidence.</li></ul></details><details class="dp-guide-card"><summary>Evening Review</summary><p>Capture lessons while they are fresh. Reflection is how performance improves daily.</p><ul><li>Record wins, bottlenecks, and emotional triggers.</li><li>Convert insights into tomorrow's top 3 priorities.</li><li>Check if broadcast and follow-ups were completed.</li></ul></details></div></section>
   </div>`;
