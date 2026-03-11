@@ -85,6 +85,7 @@
     <button class="tab-btn" onclick="switchTab('timeline')">⏱ Timeline</button>
     <button class="tab-btn" onclick="switchTab('personal-dash')">📊 Dashboard</button>
     <button class="tab-btn" onclick="switchTab('leadflow')">🧲 LeadFlow</button>
+    <button class="tab-btn" onclick="switchTab('daily-pulse')">🫀 Daily Pulse</button>
     <button class="tab-btn" onclick="switchTab('clients')">👥 Clients</button>
     <button class="tab-btn" onclick="switchTab('analytics')">📈 Analytics</button>
     <button class="tab-btn" onclick="switchTab('settings')">⚙️ Settings</button>
@@ -218,6 +219,14 @@
       <h4>📈 Energy Trend (last 30 entries)</h4>
       <div id="personal-chart-wrap"><canvas id="personalChart"></canvas></div>
     </div>
+  </div>
+
+
+  <!-- ══════════════════════════════════ -->
+  <!-- TAB: DAILY PULSE -->
+  <!-- ══════════════════════════════════ -->
+  <div class="tab-pane" id="tab-daily-pulse">
+    <div id="dailyPulseView"></div>
   </div>
 
   <!-- ══════════════════════════════════ -->
