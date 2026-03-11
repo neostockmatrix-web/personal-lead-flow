@@ -21,6 +21,7 @@ const GOALS_KEY   = 'kk_goals_v8';
 const REVIEWS_KEY = 'kk_reviews_v8';
 const AUDIT_KEY   = 'kk_audit_v8';
 const PREF_KEY    = 'kk_prefs_v1';
+const DAILY_TRACKER_KEY = 'kk_daily_tracker_v8';
 
 /* Legacy key migration */
 const LEGACY_LF  = ['kk_leads','kk_leads_v2','kk_leadflow','kk_leadflow_v7'];
@@ -50,6 +51,31 @@ let entryLimit        = 60;
 let lastDeletedEntry  = null;
 let lastDeletedTimer  = null;
 
+let dtState          = null;
+
+function createDefaultDTState(date=todayISO()){
+  return {
+    date,
+    hunterTasks: [],
+    guardianTasks: [],
+    closerTasks: [],
+    nudges: 0,
+    calls: 0,
+    broadcastStreak: 0,
+    studyDone: false,
+    reviewWins: '',
+    reviewChallenges: '',
+    progress: 0
+  };
+}
+
+const state = {
+  get leads(){ return leads; },
+  get entries(){ return entries; },
+  get dtState(){ return dtState; },
+  set dtState(v){ dtState = v; }
+};
+
 /* ══ CONSTANTS ══ */
 const STAGES = ['col-prospect','col-contacted','col-proposal','col-potential','col-won','col-lost'];
 const PROBS  = {'col-prospect':.2,'col-contacted':.4,'col-proposal':.7,'col-potential':.55,'col-won':1,'col-lost':0};
@@ -66,6 +92,22 @@ function fmtDateTime(ts){return new Date(ts).toLocaleString('en-IN',{day:'2-digi
 function daysSince(ts){return Math.floor((Date.now()-(ts||Date.now()))/86400000);}
 function daysLeft(d){return Math.max(0,Math.ceil((d-Date.now())/86400000));}
 function todayISO(){return new Date().toISOString().split('T')[0];}
+function ensureDTState(raw){
+  const base=createDefaultDTState();
+  const merged={...base,...(raw&&typeof raw==='object'?raw:{})};
+  ['hunterTasks','guardianTasks','closerTasks'].forEach(k=>{
+    merged[k]=Array.isArray(merged[k])?merged[k].map(t=>({id:t.id||genId(),text:sanitize(t.text||''),done:!!t.done,createdAt:t.createdAt||Date.now(),doneAt:t.doneAt||null})).filter(t=>t.text):[];
+  });
+  merged.nudges=Number(merged.nudges)||0;
+  merged.calls=Number(merged.calls)||0;
+  merged.broadcastStreak=Number(merged.broadcastStreak)||0;
+  merged.studyDone=!!merged.studyDone;
+  merged.reviewWins=sanitize(merged.reviewWins||'');
+  merged.reviewChallenges=sanitize(merged.reviewChallenges||'');
+  merged.progress=Number(merged.progress)||0;
+  if(merged.date!==todayISO()) merged={...createDefaultDTState(todayISO()),broadcastStreak:Math.max(0,Number(merged.broadcastStreak)||0)};
+  return merged;
+}
 function escHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function sanitize(v){return String(v||'').replace(/[<>\u0000-\u001F]/g,'').trim();}
 function isValidEmail(v){return !v||/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);}
@@ -154,6 +196,7 @@ function loadAll(){
   try{ reviews  = JSON.parse(localStorage.getItem(REVIEWS_KEY)||'[]'); }catch(e){reviews=[];}
   try{ auditLog = JSON.parse(localStorage.getItem(AUDIT_KEY)||'[]'); }catch(e){auditLog=[];}
   try{ prefs = {...prefs,...JSON.parse(localStorage.getItem(PREF_KEY)||'{}')}; }catch(e){}
+  try{ dtState = ensureDTState(JSON.parse(localStorage.getItem(DAILY_TRACKER_KEY)||'null')); }catch(e){dtState=createDefaultDTState();}
   if(!Array.isArray(entries)) entries=[];
   if(!Array.isArray(leads))   leads=[];
   entries=entries.map(validateEntry).filter(Boolean);
@@ -161,6 +204,7 @@ function loadAll(){
   if(!Array.isArray(sipLog))  sipLog=[];
   if(!Array.isArray(goals))   goals=[];
   if(!Array.isArray(reviews)) reviews=[];
+  if(!dtState) dtState=createDefaultDTState();
 }
 
 function applyTheme(){document.body.setAttribute('data-theme',prefs.darkMode?'dark':'light');const t=$('darkModeToggle');if(t)t.checked=!!prefs.darkMode;}
@@ -173,6 +217,7 @@ function saveAll(){
   localStorage.setItem(GOALS_KEY,  JSON.stringify(goals));
   localStorage.setItem(REVIEWS_KEY,JSON.stringify(reviews));
   localStorage.setItem(PREF_KEY,   JSON.stringify(prefs));
+  localStorage.setItem(DAILY_TRACKER_KEY, JSON.stringify(ensureDTState(dtState)));
   const t = new Date().toLocaleTimeString();
   const el1=$('lastSyncTime');  if(el1) el1.textContent='Saved '+t;
   const el2=$('lastSyncTime2'); if(el2) el2.textContent=t;
@@ -180,7 +225,7 @@ function saveAll(){
 }
 
 function getUnifiedPayload(){
-  return {entries,leads,targets,sipLog,goals,reviews,auditLog,exportedAt:new Date().toISOString()};
+  return {entries,leads,targets,sipLog,goals,reviews,auditLog,dailyTracker:ensureDTState(dtState),exportedAt:new Date().toISOString()};
 }
 
 function queueBackup(){
@@ -297,6 +342,7 @@ function importUnifiedJSON(ev){
       if(data.sipLog   &&Array.isArray(data.sipLog))    sipLog=data.sipLog;
       if(data.goals    &&Array.isArray(data.goals))     goals=data.goals;
       if(data.reviews  &&Array.isArray(data.reviews))   reviews=data.reviews;
+      if(data.dailyTracker&&typeof data.dailyTracker==='object') dtState=ensureDTState(data.dailyTracker);
       if(Array.isArray(data)) leads=data; // legacy leads-only
       entries=entries.map(validateEntry).filter(Boolean);
       leads=leads.map(validateLead).filter(Boolean);
@@ -339,6 +385,7 @@ function switchTab(name){
   if(name==='personal-dash')renderPersonalDash();
   if(name==='analytics')    renderPersonalAnalytics();
   if(name==='clients')      renderClientsTab();
+  if(name==='daily-pulse')  renderDailyPulse();
   if(name==='leadflow')     renderLeadFlow();
   if(name==='settings')     renderSettings();
 }
@@ -1717,6 +1764,99 @@ function renderSettings(){
   }
 }
 
+
+/* ══ DAILY PULSE ══ */
+function renderCalls(){
+  const leadPool=(state.leads||[]).filter(l=>!l.deletedAt).slice().sort((a,b)=>((b.history||[]).length-(a.history||[]).length));
+  return leadPool.slice(0,8).map(l=>({id:l.id,name:l.name,phone:l.phone||''}));
+}
+
+function dailyPulseSetReview(field,value){
+  if(!dtState) dtState=createDefaultDTState();
+  dtState[field]=sanitize(value);
+  dailyPulseRecalculateProgress();
+  saveAll();
+}
+
+function dailyPulseAddTask(zone){
+  const input=$(zone+'TaskInput');
+  const text=sanitize(input?.value||'');
+  if(!text) return;
+  dtState[zone+'Tasks'].push({id:genId(),text,done:false,createdAt:Date.now(),doneAt:null});
+  if(input) input.value='';
+  dailyPulseRecalculateProgress();
+  saveAll();
+  renderDailyPulse();
+}
+
+function dailyPulseLogNudge(name,channel){
+  const safeName=sanitize(name||'Client');
+  dtState.nudges+=1;
+  const nudgeText=`#nudge ${safeName} via ${channel}`;
+  entries.unshift(validateEntry({id:genId(),type:'Note',text:nudgeText,timestamp:Date.now(),date:new Date().toISOString(),dateShort:fmtDate(Date.now()),sourceType:'daily-pulse'}));
+  dailyPulseRecalculateProgress();
+  saveAll();
+  renderDailyPulse();
+}
+
+function dailyPulseLogCall(name){
+  const safeName=sanitize(name||'Client');
+  dtState.calls+=1;
+  const callText=`#call ${safeName} from Daily Pulse`;
+  entries.unshift(validateEntry({id:genId(),type:'Note',text:callText,timestamp:Date.now(),date:new Date().toISOString(),dateShort:fmtDate(Date.now()),sourceType:'daily-pulse'}));
+  dailyPulseRecalculateProgress();
+  saveAll();
+  renderDailyPulse();
+}
+
+function dailyPulseToggleTask(zone,id){
+  const list=dtState[zone+'Tasks'];
+  const task=list.find(t=>String(t.id)===String(id));
+  if(!task) return;
+  task.done=!task.done;
+  task.doneAt=task.done?Date.now():null;
+  if(task.done){
+    const tags=extractClientTags(task.text);
+    tags.forEach(tag=>{
+      const lead=leads.find(l=>normKey(l.name)===normKey(tag));
+      if(lead){
+        lead.history=Array.isArray(lead.history)?lead.history:[];
+        lead.history.push({event:'Task completed',text:task.text,timestamp:Date.now()});
+      }
+    });
+  }
+  dailyPulseRecalculateProgress();
+  saveAll();
+  renderDailyPulse();
+}
+
+function dailyPulseRecalculateProgress(){
+  const allTasks=[...dtState.hunterTasks,...dtState.guardianTasks,...dtState.closerTasks];
+  const doneTasks=allTasks.filter(t=>t.done).length;
+  const taskScore=allTasks.length?Math.min(45,Math.round((doneTasks/allTasks.length)*45)):0;
+  const callScore=Math.min(20,dtState.calls*4);
+  const nudgeScore=Math.min(20,dtState.nudges*4);
+  const studyScore=dtState.studyDone?7:0;
+  const reviewScore=(dtState.reviewWins||dtState.reviewChallenges)?8:0;
+  dtState.progress=Math.min(100,taskScore+callScore+nudgeScore+studyScore+reviewScore);
+}
+
+function dailyPulseToggleStudyDone(){
+  dtState.studyDone=!dtState.studyDone;
+  dailyPulseRecalculateProgress();
+  saveAll();
+  renderDailyPulse();
+}
+
+function renderDailyPulse(){
+  if(!dtState) dtState=createDefaultDTState();
+  dailyPulseRecalculateProgress();
+  const host=$('dailyPulseView'); if(!host) return;
+  const calls=renderCalls();
+  const zoneBlock=(zone,title,desc)=>`<section class="dp-zone"><div class="dp-zone-head"><h4>${title}</h4><p>${desc}</p></div><div class="dp-task-add"><input id="${zone}TaskInput" placeholder="Add ${title} task (use #ClientName to auto-link lead history)"><button onclick="dailyPulseAddTask('${zone}')">Add</button></div><div class="dp-task-list">${(dtState[zone+'Tasks']||[]).map(t=>`<label class="dp-task-card ${t.done?'done':''}"><input type="checkbox" ${t.done?'checked':''} onchange="dailyPulseToggleTask('${zone}','${t.id}')"><div><div class="dp-task-text">${escHtml(t.text)}</div><div class="dp-task-meta">${t.doneAt?'Completed '+fmtDateTime(t.doneAt):'Pending'}</div></div></label>`).join('')||'<div class="dp-empty">No tasks yet.</div>'}</div></section>`;
+  host.innerHTML=`<div class="daily-pulse-grid"><section class="dp-overview"><div class="dp-ring" style="--progress:${dtState.progress};"><div><strong>${dtState.progress}%</strong><span>Daily Completion</span></div></div><div class="dp-counters"><button onclick="dailyPulseLogCall('General Follow-up')">📞 Calls: ${dtState.calls}</button><button onclick="dailyPulseLogNudge('Broadcast','WhatsApp')">💬 Nudges: ${dtState.nudges}</button><button onclick="dailyPulseToggleStudyDone()">📚 Study: ${dtState.studyDone?'Done':'Pending'}</button></div><div class="dp-review"><textarea placeholder="Wins captured today..." oninput="dailyPulseSetReview('reviewWins',this.value)">${escHtml(dtState.reviewWins)}</textarea><textarea placeholder="Challenges and blockers..." oninput="dailyPulseSetReview('reviewChallenges',this.value)">${escHtml(dtState.reviewChallenges)}</textarea></div></section><section class="dp-guide"><h3>Advisor Workflow Guidance</h3><div class="dp-guide-list"><details class="dp-guide-card" open><summary>Morning Setup</summary><p>Start with clarity. Review today's non-negotiables, check follow-up commitments, scan pending service issues, and set one primary conversion objective.</p><ul><li>Review your top 5 priority leads and note exact next action.</li><li>Prepare your market broadcast draft before noon.</li><li>Block your calendar for Hunter, Guardian, and Closer windows.</li><li>Select 3 clients that need confidence-building communication.</li></ul></details><details class="dp-guide-card"><summary>Hunter Mode</summary><p>This is pure pipeline building. Prospect, reconnect and generate new conversations with consistency.</p><ul><li>Send 5 personalized WhatsApp nudges.</li><li>Reconnect with old leads using contextual hooks.</li><li>Add at least 1 new prospect into LeadFlow with clear stage.</li></ul></details><details class="dp-guide-card"><summary>Guardian Mode</summary><p>Protect trust and retention. Service quality compounds referrals and long-term AUM.</p><ul><li>Check pending queries and resolve before market close.</li><li>Send reassurance notes during volatility in calm language.</li><li>Update portfolio notes and next review dates.</li></ul></details><details class="dp-guide-card"><summary>Closer Mode</summary><p>Move warm intent into committed action through structured conversations.</p><ul><li>Call warm leads with clear agenda and outcome target.</li><li>Schedule meetings and document objections in PowerLog.</li><li>Discuss SIP discipline and portfolio strategy with evidence.</li></ul></details><details class="dp-guide-card"><summary>Evening Review</summary><p>Capture lessons while they are fresh. Reflection is how performance improves daily.</p><ul><li>Record wins, bottlenecks, and emotional triggers.</li><li>Convert insights into tomorrow's top 3 priorities.</li><li>Check if broadcast and follow-ups were completed.</li></ul></details></div></section>${zoneBlock('hunter','Hunter','Lead generation, prospecting, outbound outreach')} ${zoneBlock('guardian','Guardian','Client servicing, portfolio monitoring, relationship maintenance')} ${zoneBlock('closer','Closer','Meetings, investment discussions, conversions')}<section class="dp-calls"><h4>Call Suggestions from LeadFlow</h4><div class="dp-call-list">${calls.map(c=>`<div class="dp-call-card"><div><strong>${escHtml(c.name)}</strong><span>${escHtml(c.phone||'No phone saved')}</span></div><div><button onclick="dailyPulseLogCall(${JSON.stringify(c.name)})">Log Call</button><button onclick="dailyPulseLogNudge(${JSON.stringify(c.name)},'WhatsApp')">Log Nudge</button></div></div>`).join('')||'<div class="dp-empty">Add leads to get call recommendations.</div>'}</div></section><section class="dp-guide long"><h3>Guidance Cards · Text Coaching Modules</h3><details class="dp-guide-card" open><summary>How to Write a Great Broadcast Message</summary><p><strong>Purpose:</strong> Your daily market update is your most consistent trust-building ritual. Clients judge reliability through continuity, not occasional brilliance.</p><p><strong>Structure:</strong> Keep it 4-6 lines. Start with a factual market line, add context, and close with a calm investor lens.</p><p><strong>Example:</strong><br>📈 Markets today: Nifty +0.6% | Sensex at 79,240.<br>Mid & small caps outperformed.<br>RBI policy meet next week — markets watching closely.<br>Your SIPs are quietly accumulating units at today's price — that's the magic of staying invested.<br>🙏 — [Your Name]</p><p><strong>Tone Guidelines:</strong> calm, educational, steady. Never create panic, never create hype, never make guaranteed-return language.</p><p><strong>WhatsApp Tips:</strong> use 1-2 emojis, keep spacing clean, personalize with your own words, and send before 8 PM for best attention.</p><p><strong>What NOT to do:</strong> avoid phrases like “market is crashing” or “great time to buy now.” These push emotional decisions.</p></details><details class="dp-guide-card"><summary>How to Handle Volatility Conversations</summary><p>Use a 3-step script: acknowledge emotion, restate plan, suggest one practical next step. Example: “I understand the anxiety. Your allocation was built for phases like this. Let's do a 10-minute check-in tomorrow and review your SIP roadmap together.”</p></details><details class="dp-guide-card"><summary>How to Improve Conversion Quality</summary><p>Before every meeting, define one conversion objective, one proof point, and one objection response. After each discussion, immediately log decision signals in PowerLog and set the next dated action in LeadFlow.</p></details></section></div>`;
+}
+
 /* ══ DRAG & DROP ══ */
 let dragId=null;
 function dragStart(e){dragId=e.target.closest('[data-lead-id]')?.dataset.leadId;e.target.closest('.lead-card')?.classList.add('dragging');}
@@ -1767,6 +1907,7 @@ function renderAll(){
   renderGoalDisplay();
   updateLogClientOptions();
   renderSettings();
+  if(document.querySelector('#tab-daily-pulse.active')) renderDailyPulse();
   // Only render the active LeadFlow sub-tab to avoid hidden canvas issues
   const lfTabActive=document.querySelector('#tab-leadflow.active');
   if(lfTabActive) renderLeadFlow();
