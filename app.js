@@ -52,6 +52,8 @@ let lastDeletedEntry  = null;
 let lastDeletedTimer  = null;
 
 let dtState          = null;
+let knowledgeLog     = [];
+let insightLog       = [];
 
 function createDefaultDTState(date=todayISO()){
   return {
@@ -59,13 +61,23 @@ function createDefaultDTState(date=todayISO()){
     hunterTasks: [],
     guardianTasks: [],
     closerTasks: [],
-    nudges: 0,
-    calls: 0,
-    broadcastStreak: 0,
-    studyDone: false,
-    reviewWins: '',
-    reviewChallenges: '',
-    progress: 0
+    nudges:{mfd:0,life:0,health:0},
+    broadcast:false,
+    bcGroups:{},
+    bcNote:'',
+    calls:[],
+    output:{wa:0,calls:0,meetings:0,proposals:0,deals:0},
+    moneyMoves:{},
+    score:0,
+    big3:['','',''],
+    streak:0,
+    lastBroadcastDate:'',
+    studyProduct:'',
+    studyDone:false,
+    reviewWins:'',
+    reviewChallenges:'',
+    progress:0,
+    newContactChannel:'wa'
   };
 }
 
@@ -92,20 +104,50 @@ function fmtDateTime(ts){return new Date(ts).toLocaleString('en-IN',{day:'2-digi
 function daysSince(ts){return Math.floor((Date.now()-(ts||Date.now()))/86400000);}
 function daysLeft(d){return Math.max(0,Math.ceil((d-Date.now())/86400000));}
 function todayISO(){return new Date().toISOString().split('T')[0];}
+function yesterdayISO(){
+  const d=new Date();
+  d.setDate(d.getDate()-1);
+  return d.toISOString().split('T')[0];
+}
 function ensureDTState(raw){
   const base=createDefaultDTState();
-  const merged={...base,...(raw&&typeof raw==='object'?raw:{})};
+  let merged={...base,...(raw&&typeof raw==='object'?raw:{})};
   ['hunterTasks','guardianTasks','closerTasks'].forEach(k=>{
     merged[k]=Array.isArray(merged[k])?merged[k].map(t=>({id:t.id||genId(),text:sanitize(t.text||''),done:!!t.done,createdAt:t.createdAt||Date.now(),doneAt:t.doneAt||null})).filter(t=>t.text):[];
   });
-  merged.nudges=Number(merged.nudges)||0;
-  merged.calls=Number(merged.calls)||0;
-  merged.broadcastStreak=Number(merged.broadcastStreak)||0;
+  const nRaw=merged.nudges&&typeof merged.nudges==='object'?merged.nudges:{};
+  merged.nudges={mfd:Math.max(0,Number(nRaw.mfd)||0),life:Math.max(0,Number(nRaw.life)||0),health:Math.max(0,Number(nRaw.health)||0)};
+  merged.broadcast=!!merged.broadcast;
+  merged.bcGroups=(merged.bcGroups&&typeof merged.bcGroups==='object')?merged.bcGroups:{};
+  merged.bcNote=sanitize(merged.bcNote||'');
+  merged.calls=Array.isArray(merged.calls)?merged.calls.map(c=>({id:c.id||Date.now(),name:sanitize(c.name||''),done:!!c.done,channel:['wa','call'].includes(c.channel)?c.channel:'wa'})).filter(c=>c.name):[];
+  const oRaw=merged.output&&typeof merged.output==='object'?merged.output:{};
+  merged.output={wa:Math.max(0,Number(oRaw.wa)||0),calls:Math.max(0,Number(oRaw.calls)||0),meetings:Math.max(0,Number(oRaw.meetings)||0),proposals:Math.max(0,Number(oRaw.proposals)||0),deals:Math.max(0,Number(oRaw.deals)||0)};
+  merged.moneyMoves=(merged.moneyMoves&&typeof merged.moneyMoves==='object')?merged.moneyMoves:{};
+  merged.score=Math.max(0,Math.min(10,Number(merged.score)||0));
+  merged.big3=Array.isArray(merged.big3)?merged.big3.slice(0,3).map(v=>sanitize(v||'')):['','',''];
+  while(merged.big3.length<3) merged.big3.push('');
+  merged.streak=Math.max(0,Number(merged.streak)||0);
+  merged.lastBroadcastDate=sanitize(merged.lastBroadcastDate||'');
+  merged.studyProduct=sanitize(merged.studyProduct||'');
   merged.studyDone=!!merged.studyDone;
   merged.reviewWins=sanitize(merged.reviewWins||'');
   merged.reviewChallenges=sanitize(merged.reviewChallenges||'');
-  merged.progress=Number(merged.progress)||0;
-  if(merged.date!==todayISO()) merged={...createDefaultDTState(todayISO()),broadcastStreak:Math.max(0,Number(merged.broadcastStreak)||0)};
+  merged.progress=Math.max(0,Math.min(100,Number(merged.progress)||0));
+  merged.newContactChannel=['wa','call'].includes(merged.newContactChannel)?merged.newContactChannel:'wa';
+
+  if(merged.date!==todayISO()){
+    const priorDate=merged.date;
+    const priorBroadcast=!!merged.broadcast;
+    const priorStreak=merged.streak;
+    const priorLastBroadcastDate=merged.lastBroadcastDate;
+    merged={...createDefaultDTState(todayISO()),lastBroadcastDate:priorLastBroadcastDate};
+    if(priorDate===yesterdayISO()&&priorBroadcast){
+      merged.streak=priorStreak+1;
+    }else{
+      merged.streak=0;
+    }
+  }
   return merged;
 }
 function escHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
@@ -1766,9 +1808,305 @@ function renderSettings(){
 
 
 /* ══ DAILY PULSE ══ */
+const NUDGE_CONFIG={mfd:{total:5,color:'var(--gold)'},life:{total:3,color:'var(--blue)'},health:{total:2,color:'var(--teal)'}};
+const MM_MSGS=['None yet — start asking!','Good start — keep going','Building momentum 💪','Solid revenue behaviour!','Strong day of asking 🔥','Strong day of asking 🔥','All 6 money moves done! 🏆'];
+const SCORE_MSGS=['','Rough day — take rest','Tough one — learn from it','Below average','Decent effort','Solid day','Good work','Strong day!','Very good!','Excellent!','🔥 Perfect day!'];
+
+function loadKnowledgeLog(){
+  try{ knowledgeLog=JSON.parse(localStorage.getItem('kk_knowledgelog_v1')||'[]'); }catch(e){knowledgeLog=[];}
+  if(!Array.isArray(knowledgeLog)) knowledgeLog=[];
+}
+function loadInsightLog(){
+  try{ insightLog=JSON.parse(localStorage.getItem('kk_insightlog_v1')||'[]'); }catch(e){insightLog=[];}
+  if(!Array.isArray(insightLog)) insightLog=[];
+}
+function saveKnowledgeLog(){ localStorage.setItem('kk_knowledgelog_v1',JSON.stringify(knowledgeLog)); }
+function saveInsightLog(){ localStorage.setItem('kk_insightlog_v1',JSON.stringify(insightLog)); }
+
+function migrateDailyTrackerV2(){
+  try{
+    const raw=localStorage.getItem('kk_dailytracker_v2');
+    if(!raw) return;
+    const old=JSON.parse(raw);
+    if(!old||old.date!==todayISO()) return;
+    dtState=ensureDTState({...dtState,
+      nudges:old.nudges,
+      broadcast:old.broadcast,
+      bcGroups:old.bcGroups,
+      bcNote:old.bcNote,
+      calls:old.calls,
+      output:old.output,
+      moneyMoves:old.moneyMoves,
+      score:old.score,
+      big3:old.big3,
+      reviewWins:old.reviewWins,
+      reviewChallenges:old.reviewChallenges,
+      streak:old.streak,
+      lastBroadcastDate:old.lastBroadcastDate
+    });
+    saveAll();
+  }catch(e){}
+}
+
+function buildNudgeDots(){
+  Object.keys(NUDGE_CONFIG).forEach(type=>{
+    const wrap=$(type+'-dots'); if(!wrap) return;
+    wrap.innerHTML='';
+    const total=NUDGE_CONFIG[type].total;
+    for(let i=0;i<total;i++){
+      const dot=document.createElement('button');
+      dot.type='button';
+      dot.className='nudge-dot'+(i<dtState.nudges[type]?' lit':'');
+      dot.style.setProperty('--nudge-color',NUDGE_CONFIG[type].color);
+      dot.onclick=()=>nudgeTap(type,i);
+      wrap.appendChild(dot);
+    }
+  });
+  updateNudgeCounts();
+}
+function nudgeTap(type,idx){
+  const curr=dtState.nudges[type]||0;
+  dtState.nudges[type]=(idx<curr)?idx:idx+1;
+  saveAll();
+  buildNudgeDots();
+}
+function updateNudgeCounts(){
+  Object.keys(NUDGE_CONFIG).forEach(type=>{
+    const curr=dtState.nudges[type]||0;
+    const total=NUDGE_CONFIG[type].total;
+    const c=$(type+'-count'); if(c) c.textContent=String(curr);
+    const d=$(type+'-done'); if(d) d.textContent=`${curr}/${total}`;
+  });
+}
+
+function toggleBroadcast(){
+  dtState.broadcast=!dtState.broadcast;
+  if(dtState.broadcast) dtState.lastBroadcastDate=todayISO();
+  saveAll();
+  restoreBroadcast();
+  updateStreak();
+}
+function toggleBcGroup(el){
+  if(!el) return;
+  const key=el.dataset.group||'';
+  if(!key) return;
+  dtState.bcGroups[key]=!dtState.bcGroups[key];
+  el.classList.toggle('sent',!!dtState.bcGroups[key]);
+  saveAll();
+}
+function addBcGroupPrompt(){
+  const name=sanitize(prompt('Broadcast group name')||'');
+  if(!name) return;
+  dtState.bcGroups[name]=!!dtState.bcGroups[name];
+  const row=$('bcGroups'); if(!row) return saveAll();
+  const chip=document.createElement('button');
+  chip.type='button';
+  chip.className='bc-group-chip'+(dtState.bcGroups[name]?' sent':'');
+  chip.dataset.group=name;
+  chip.textContent=name;
+  chip.onclick=function(){toggleBcGroup(this);};
+  row.insertBefore(chip,row.lastElementChild||null);
+  saveAll();
+}
+function restoreBroadcast(){
+  const tg=$('broadcastToggle'); if(tg) tg.classList.toggle('active',!!dtState.broadcast);
+  const ta=$('bcNote'); if(ta) ta.value=dtState.bcNote||'';
+  const row=$('bcGroups');
+  if(row){
+    row.querySelectorAll('[data-group]').forEach(el=>el.classList.toggle('sent',!!dtState.bcGroups[el.dataset.group]));
+    Object.keys(dtState.bcGroups).forEach(k=>{
+      if(row.querySelector(`[data-group="${CSS.escape(k)}"]`)) return;
+      const chip=document.createElement('button');
+      chip.type='button';
+      chip.className='bc-group-chip'+(dtState.bcGroups[k]?' sent':'');
+      chip.dataset.group=k;
+      chip.textContent=k;
+      chip.onclick=function(){toggleBcGroup(this);};
+      row.insertBefore(chip,row.lastElementChild||null);
+    });
+  }
+}
+function updateStreak(){ const el=$('streakCount'); if(el) el.textContent=String(dtState.streak||0); }
+
+function showCallInput(){
+  const row=$('dpCallInputRow'); if(!row) return;
+  row.classList.toggle('show');
+  const input=$('dpCallInput'); if(input && row.classList.contains('show')) input.focus();
+}
+function addCall(){
+  const input=$('dpCallInput');
+  const name=sanitize(input?.value||'');
+  if(!name) return;
+  dtState.calls.push({id:Date.now(),name,done:false,channel:dtState.newContactChannel||'wa'});
+  if(input) input.value='';
+  saveAll();
+  renderCalls();
+}
+function toggleCall(id){
+  dtState.calls=dtState.calls.map(c=>String(c.id)===String(id)?{...c,done:!c.done}:c);
+  saveAll();
+  renderCalls();
+}
+function deleteCall(id,e){
+  if(e&&e.stopPropagation) e.stopPropagation();
+  dtState.calls=dtState.calls.filter(c=>String(c.id)!==String(id));
+  saveAll();
+  renderCalls();
+}
 function renderCalls(){
-  const leadPool=(state.leads||[]).filter(l=>!l.deletedAt).slice().sort((a,b)=>((b.history||[]).length-(a.history||[]).length));
-  return leadPool.slice(0,8).map(l=>({id:l.id,name:l.name,phone:l.phone||''}));
+  const listEl=$('dpCallList');
+  const statEl=$('dpCallStats');
+  const emptyEl=$('dpEmptyCallsMsg');
+  const calls=Array.isArray(dtState.calls)?dtState.calls:[];
+  const done=calls.filter(c=>c.done).length;
+  if(statEl) statEl.textContent=`${done}/${calls.length} completed`;
+  if(emptyEl) emptyEl.style.display=calls.length?'none':'';
+  if(!listEl) return;
+  listEl.innerHTML=calls.map(c=>`<div class="dp-call-item ${c.done?'done':''}" onclick="toggleCall('${c.id}')"><div><strong>${escHtml(c.name)}</strong><span class="badge">${c.channel==='wa'?'💬 WA':'📞 Call'}</span></div><div><span>${c.done?'Done':'Pending'}</span><button onclick="deleteCall('${c.id}',event)">✕</button></div></div>`).join('');
+}
+
+function changeOutput(key,delta){
+  if(!dtState.output.hasOwnProperty(key)) return;
+  dtState.output[key]=Math.max(0,(Number(dtState.output[key])||0)+delta);
+  saveAll();
+  renderOutput();
+}
+function renderOutput(){
+  Object.keys(dtState.output||{}).forEach(k=>{
+    const el=$('out-'+k); if(!el) return;
+    const v=Number(dtState.output[k])||0;
+    el.textContent=String(v);
+    el.classList.toggle('nonzero',v>0);
+  });
+  updateOutputInsight();
+}
+function updateOutputInsight(){
+  const el=$('outputInsight'); if(!el) return;
+  const o=dtState.output||{};
+  const total=(o.wa||0)+(o.calls||0)+(o.meetings||0)+(o.proposals||0)+(o.deals||0);
+  if(total===0){el.textContent='Start logging your output to see conversion insight';return;}
+  if((o.deals||0)>0){el.textContent=`${o.deals} deals closed — great work!`;return;}
+  if((o.meetings||0)>0){
+    const touches=(o.wa||0)+(o.calls||0);
+    const pct=touches?Math.round((o.meetings/touches)*100):0;
+    el.textContent=`Touch-to-meeting conversion: ${pct}% (${o.meetings}/${touches||1})`;
+    return;
+  }
+  if(total>=5&&(o.meetings||0)===0){el.textContent=`Aim for at least 1 meeting from these ${total} touches`;return;}
+  el.textContent='Keep building your daily output momentum';
+}
+
+function toggleMove(el){
+  if(!el) return;
+  const key=el.dataset.move||'';
+  if(!key) return;
+  dtState.moneyMoves[key]=!dtState.moneyMoves[key];
+  el.classList.toggle('done',!!dtState.moneyMoves[key]);
+  const svg=el.querySelector('svg'); if(svg) svg.style.opacity=dtState.moneyMoves[key]?'1':'.5';
+  saveAll();
+  updateMoneyScore();
+}
+function updateMoneyScore(){
+  const done=Object.values(dtState.moneyMoves||{}).filter(Boolean).length;
+  const score=$('mmScore'); if(score) score.textContent=String(done);
+  const msg=$('mmMsg'); if(msg) msg.textContent=MM_MSGS[Math.min(6,done)]||MM_MSGS[0];
+}
+function restoreMoneyMoves(){
+  document.querySelectorAll('.money-move[data-move]').forEach(el=>{
+    const key=el.dataset.move;
+    const on=!!dtState.moneyMoves[key];
+    el.classList.toggle('done',on);
+    const svg=el.querySelector('svg'); if(svg) svg.style.opacity=on?'1':'.5';
+  });
+  updateMoneyScore();
+}
+
+function buildScore(){
+  const track=$('scoreTrack'); if(!track) return;
+  track.innerHTML='';
+  for(let i=0;i<10;i++){
+    const dot=document.createElement('button');
+    dot.type='button';
+    dot.className='score-dot'+(i<dtState.score?' active':'');
+    dot.onclick=()=>setScore(i+1);
+    track.appendChild(dot);
+  }
+  updateScoreDisplay();
+}
+function setScore(n){
+  dtState.score=Math.max(0,Math.min(10,Number(n)||0));
+  saveAll();
+  const dots=[...document.querySelectorAll('#scoreTrack .score-dot')];
+  dots.forEach((d,i)=>d.classList.toggle('active',i<dtState.score));
+  updateScoreDisplay();
+}
+function updateScoreDisplay(){
+  const c=$('scoreCurrent'); if(c) c.textContent=String(dtState.score||0);
+  const m=$('scoreMsg'); if(m) m.textContent=SCORE_MSGS[dtState.score||0]||'';
+}
+
+function saveBig3(){
+  dtState.big3=[sanitize($('b3_1')?.value||''),sanitize($('b3_2')?.value||''),sanitize($('b3_3')?.value||'')];
+  saveAll();
+  const raw=localStorage.getItem(PS_KEY)||'[]';
+  let logs=[];
+  try{logs=JSON.parse(raw);}catch(e){logs=[];}
+  const priorities=['High','Medium','Low'];
+  const tomorrow9=new Date(); tomorrow9.setDate(tomorrow9.getDate()+1); tomorrow9.setHours(9,0,0,0);
+  dtState.big3.forEach((txt,i)=>{
+    if(!txt) return;
+    const dup=logs.some(e=>String(e.type)==='Task'&&String(e.text||'').trim().toLowerCase()===txt.toLowerCase());
+    if(dup) return;
+    logs.unshift({id:genId(),text:txt,type:'Task',priority:priorities[i],reminder:new Date(tomorrow9.getTime()+i*3600000).toISOString().slice(0,16),done:false,tags:['big3'],sourceType:'big3-tracker',date:new Date().toISOString(),dateShort:fmtDate(Date.now())});
+  });
+  localStorage.setItem(PS_KEY,JSON.stringify(logs));
+  entries=logs.map(validateEntry).filter(Boolean);
+  const ok=$('b3SavedMsg'); if(ok){ok.textContent='Big 3 saved and added to PowerLog tasks.';setTimeout(()=>ok.textContent='',2200);} 
+}
+function restoreBig3(){
+  ['b3_1','b3_2','b3_3'].forEach((id,i)=>{const el=$(id); if(el) el.value=dtState.big3[i]||'';});
+}
+
+function setStudyProduct(p){
+  dtState.studyProduct=sanitize(p||'general');
+  saveAll();
+  ['life','health','mfd','general'].forEach(k=>{const el=$('sptab-'+k); if(el) el.classList.toggle('active',dtState.studyProduct===k);});
+}
+function saveStudyEntry(){
+  const input=$('dpStudyInput');
+  const text=sanitize(input?.value||'');
+  if(!text) return;
+  const item={id:Date.now(),date:todayISO(),product:dtState.studyProduct||'general',text};
+  knowledgeLog.unshift(item); if(knowledgeLog.length>200) knowledgeLog=knowledgeLog.slice(0,200);
+  saveKnowledgeLog();
+  entries.unshift(validateEntry({id:genId(),type:'Note',text:`📘 STUDY (${item.product}): ${text}`,tags:['knowledge','study'],sourceType:'daily-pulse-study',date:new Date().toISOString(),dateShort:fmtDate(Date.now())}));
+  dtState.studyDone=true;
+  saveAll();
+  if(input) input.value='';
+  renderStudyLog();
+  if(typeof showToast==='function') showToast('Study entry saved');
+}
+function renderStudyLog(){
+  const el=$('dpStudyLog'); if(!el) return;
+  el.innerHTML=knowledgeLog.slice(0,5).map(k=>`<div class="study-row"><strong>${escHtml(k.product||'general')}</strong> · ${escHtml(k.text||'')}</div>`).join('')||'';
+}
+
+function saveInsight(){
+  const input=$('dpInsightField');
+  const text=sanitize(input?.value||'');
+  if(!text) return;
+  const item={id:Date.now(),date:todayISO(),text};
+  insightLog.unshift(item); if(insightLog.length>300) insightLog=insightLog.slice(0,300);
+  saveInsightLog();
+  entries.unshift(validateEntry({id:genId(),type:'Note',text:`💡 INSIGHT: ${text}`,tags:['insight'],sourceType:'daily-pulse-insight',date:new Date().toISOString(),dateShort:fmtDate(Date.now())}));
+  saveAll();
+  if(input) input.value='';
+  renderInsightPrev();
+  if(typeof showToast==='function') showToast('Insight saved');
+}
+function renderInsightPrev(){
+  const el=$('dpInsightPrev'); if(!el) return;
+  el.innerHTML=insightLog.slice(0,4).map(i=>`<div class="insight-row">${escHtml(i.text||'')}</div>`).join('')||'';
 }
 
 function dailyPulseSetReview(field,value){
@@ -1791,7 +2129,8 @@ function dailyPulseAddTask(zone){
 
 function dailyPulseLogNudge(name,channel){
   const safeName=sanitize(name||'Client');
-  dtState.nudges+=1;
+  const bucket=(channel&&String(channel).toLowerCase().includes('life'))?'life':(channel&&String(channel).toLowerCase().includes('health'))?'health':'mfd';
+  dtState.nudges[bucket]=(dtState.nudges[bucket]||0)+1;
   const nudgeText=`#nudge ${safeName} via ${channel}`;
   entries.unshift(validateEntry({id:genId(),type:'Note',text:nudgeText,timestamp:Date.now(),date:new Date().toISOString(),dateShort:fmtDate(Date.now()),sourceType:'daily-pulse'}));
   dailyPulseRecalculateProgress();
@@ -1801,7 +2140,7 @@ function dailyPulseLogNudge(name,channel){
 
 function dailyPulseLogCall(name){
   const safeName=sanitize(name||'Client');
-  dtState.calls+=1;
+  dtState.calls.push({id:Date.now(),name:safeName,done:false,channel:'call'});
   const callText=`#call ${safeName} from Daily Pulse`;
   entries.unshift(validateEntry({id:genId(),type:'Note',text:callText,timestamp:Date.now(),date:new Date().toISOString(),dateShort:fmtDate(Date.now()),sourceType:'daily-pulse'}));
   dailyPulseRecalculateProgress();
@@ -1834,8 +2173,10 @@ function dailyPulseRecalculateProgress(){
   const allTasks=[...dtState.hunterTasks,...dtState.guardianTasks,...dtState.closerTasks];
   const doneTasks=allTasks.filter(t=>t.done).length;
   const taskScore=allTasks.length?Math.min(45,Math.round((doneTasks/allTasks.length)*45)):0;
-  const callScore=Math.min(20,dtState.calls*4);
-  const nudgeScore=Math.min(20,dtState.nudges*4);
+  const totalCalls=(dtState.calls||[]).length;
+  const totalNudges=(dtState.nudges.mfd||0)+(dtState.nudges.life||0)+(dtState.nudges.health||0);
+  const callScore=Math.min(20,totalCalls*4);
+  const nudgeScore=Math.min(20,totalNudges*4);
   const studyScore=dtState.studyDone?7:0;
   const reviewScore=(dtState.reviewWins||dtState.reviewChallenges)?8:0;
   dtState.progress=Math.min(100,taskScore+callScore+nudgeScore+studyScore+reviewScore);
@@ -1848,13 +2189,19 @@ function dailyPulseToggleStudyDone(){
   renderDailyPulse();
 }
 
+function getLeadCallSuggestions(){
+  const leadPool=(state.leads||[]).filter(l=>!l.deletedAt).slice().sort((a,b)=>((b.history||[]).length-(a.history||[]).length));
+  return leadPool.slice(0,8).map(l=>({id:l.id,name:l.name,phone:l.phone||''}));
+}
+
 function renderDailyPulse(){
   if(!dtState) dtState=createDefaultDTState();
   dailyPulseRecalculateProgress();
   const host=$('dailyPulseView'); if(!host) return;
-  const calls=renderCalls();
+  const calls=getLeadCallSuggestions();
   const zoneBlock=(zone,title,desc)=>`<section class="dp-zone"><div class="dp-zone-head"><h4>${title}</h4><p>${desc}</p></div><div class="dp-task-add"><input id="${zone}TaskInput" placeholder="Add ${title} task (use #ClientName to auto-link lead history)"><button onclick="dailyPulseAddTask('${zone}')">Add</button></div><div class="dp-task-list">${(dtState[zone+'Tasks']||[]).map(t=>`<label class="dp-task-card ${t.done?'done':''}"><input type="checkbox" ${t.done?'checked':''} onchange="dailyPulseToggleTask('${zone}','${t.id}')"><div><div class="dp-task-text">${escHtml(t.text)}</div><div class="dp-task-meta">${t.doneAt?'Completed '+fmtDateTime(t.doneAt):'Pending'}</div></div></label>`).join('')||'<div class="dp-empty">No tasks yet.</div>'}</div></section>`;
-  host.innerHTML=`<div class="daily-pulse-grid"><section class="dp-overview"><div class="dp-ring" style="--progress:${dtState.progress};"><div><strong>${dtState.progress}%</strong><span>Daily Completion</span></div></div><div class="dp-counters"><button onclick="dailyPulseLogCall('General Follow-up')">📞 Calls: ${dtState.calls}</button><button onclick="dailyPulseLogNudge('Broadcast','WhatsApp')">💬 Nudges: ${dtState.nudges}</button><button onclick="dailyPulseToggleStudyDone()">📚 Study: ${dtState.studyDone?'Done':'Pending'}</button></div><div class="dp-review"><textarea placeholder="Wins captured today..." oninput="dailyPulseSetReview('reviewWins',this.value)">${escHtml(dtState.reviewWins)}</textarea><textarea placeholder="Challenges and blockers..." oninput="dailyPulseSetReview('reviewChallenges',this.value)">${escHtml(dtState.reviewChallenges)}</textarea></div></section><section class="dp-guide"><h3>Advisor Workflow Guidance</h3><div class="dp-guide-list"><details class="dp-guide-card" open><summary>Morning Setup</summary><p>Start with clarity. Review today's non-negotiables, check follow-up commitments, scan pending service issues, and set one primary conversion objective.</p><ul><li>Review your top 5 priority leads and note exact next action.</li><li>Prepare your market broadcast draft before noon.</li><li>Block your calendar for Hunter, Guardian, and Closer windows.</li><li>Select 3 clients that need confidence-building communication.</li></ul></details><details class="dp-guide-card"><summary>Hunter Mode</summary><p>This is pure pipeline building. Prospect, reconnect and generate new conversations with consistency.</p><ul><li>Send 5 personalized WhatsApp nudges.</li><li>Reconnect with old leads using contextual hooks.</li><li>Add at least 1 new prospect into LeadFlow with clear stage.</li></ul></details><details class="dp-guide-card"><summary>Guardian Mode</summary><p>Protect trust and retention. Service quality compounds referrals and long-term AUM.</p><ul><li>Check pending queries and resolve before market close.</li><li>Send reassurance notes during volatility in calm language.</li><li>Update portfolio notes and next review dates.</li></ul></details><details class="dp-guide-card"><summary>Closer Mode</summary><p>Move warm intent into committed action through structured conversations.</p><ul><li>Call warm leads with clear agenda and outcome target.</li><li>Schedule meetings and document objections in PowerLog.</li><li>Discuss SIP discipline and portfolio strategy with evidence.</li></ul></details><details class="dp-guide-card"><summary>Evening Review</summary><p>Capture lessons while they are fresh. Reflection is how performance improves daily.</p><ul><li>Record wins, bottlenecks, and emotional triggers.</li><li>Convert insights into tomorrow's top 3 priorities.</li><li>Check if broadcast and follow-ups were completed.</li></ul></details></div></section>${zoneBlock('hunter','Hunter','Lead generation, prospecting, outbound outreach')} ${zoneBlock('guardian','Guardian','Client servicing, portfolio monitoring, relationship maintenance')} ${zoneBlock('closer','Closer','Meetings, investment discussions, conversions')}<section class="dp-calls"><h4>Call Suggestions from LeadFlow</h4><div class="dp-call-list">${calls.map(c=>`<div class="dp-call-card"><div><strong>${escHtml(c.name)}</strong><span>${escHtml(c.phone||'No phone saved')}</span></div><div><button onclick="dailyPulseLogCall(${JSON.stringify(c.name)})">Log Call</button><button onclick="dailyPulseLogNudge(${JSON.stringify(c.name)},'WhatsApp')">Log Nudge</button></div></div>`).join('')||'<div class="dp-empty">Add leads to get call recommendations.</div>'}</div></section><section class="dp-guide long"><h3>Guidance Cards · Text Coaching Modules</h3><details class="dp-guide-card" open><summary>How to Write a Great Broadcast Message</summary><p><strong>Purpose:</strong> Your daily market update is your most consistent trust-building ritual. Clients judge reliability through continuity, not occasional brilliance.</p><p><strong>Structure:</strong> Keep it 4-6 lines. Start with a factual market line, add context, and close with a calm investor lens.</p><p><strong>Example:</strong><br>📈 Markets today: Nifty +0.6% | Sensex at 79,240.<br>Mid & small caps outperformed.<br>RBI policy meet next week — markets watching closely.<br>Your SIPs are quietly accumulating units at today's price — that's the magic of staying invested.<br>🙏 — [Your Name]</p><p><strong>Tone Guidelines:</strong> calm, educational, steady. Never create panic, never create hype, never make guaranteed-return language.</p><p><strong>WhatsApp Tips:</strong> use 1-2 emojis, keep spacing clean, personalize with your own words, and send before 8 PM for best attention.</p><p><strong>What NOT to do:</strong> avoid phrases like “market is crashing” or “great time to buy now.” These push emotional decisions.</p></details><details class="dp-guide-card"><summary>How to Handle Volatility Conversations</summary><p>Use a 3-step script: acknowledge emotion, restate plan, suggest one practical next step. Example: “I understand the anxiety. Your allocation was built for phases like this. Let's do a 10-minute check-in tomorrow and review your SIP roadmap together.”</p></details><details class="dp-guide-card"><summary>How to Improve Conversion Quality</summary><p>Before every meeting, define one conversion objective, one proof point, and one objection response. After each discussion, immediately log decision signals in PowerLog and set the next dated action in LeadFlow.</p></details></section></div>`;
+  const totalNudges=(dtState.nudges.mfd||0)+(dtState.nudges.life||0)+(dtState.nudges.health||0);
+  host.innerHTML=`<div class="daily-pulse-grid"><section class="dp-overview"><div class="dp-ring" style="--progress:${dtState.progress};"><div><strong>${dtState.progress}%</strong><span>Daily Completion</span></div></div><div class="dp-counters"><button onclick="dailyPulseLogCall('General Follow-up')">📞 Calls: ${(dtState.calls||[]).length}</button><button onclick="dailyPulseLogNudge('Broadcast','WhatsApp')">💬 Nudges: ${totalNudges}</button><button onclick="dailyPulseToggleStudyDone()">📚 Study: ${dtState.studyDone?'Done':'Pending'}</button></div><div class="dp-review"><textarea placeholder="Wins captured today..." oninput="dailyPulseSetReview('reviewWins',this.value)">${escHtml(dtState.reviewWins)}</textarea><textarea placeholder="Challenges and blockers..." oninput="dailyPulseSetReview('reviewChallenges',this.value)">${escHtml(dtState.reviewChallenges)}</textarea></div></section><section class="dp-guide"><h3>Advisor Workflow Guidance</h3><div class="dp-guide-list"><details class="dp-guide-card" open><summary>Morning Setup</summary><p>Start with clarity. Review today's non-negotiables, check follow-up commitments, scan pending service issues, and set one primary conversion objective.</p><ul><li>Review your top 5 priority leads and note exact next action.</li><li>Prepare your market broadcast draft before noon.</li><li>Block your calendar for Hunter, Guardian, and Closer windows.</li><li>Select 3 clients that need confidence-building communication.</li></ul></details><details class="dp-guide-card"><summary>Hunter Mode</summary><p>This is pure pipeline building. Prospect, reconnect and generate new conversations with consistency.</p><ul><li>Send 5 personalized WhatsApp nudges.</li><li>Reconnect with old leads using contextual hooks.</li><li>Add at least 1 new prospect into LeadFlow with clear stage.</li></ul></details><details class="dp-guide-card"><summary>Guardian Mode</summary><p>Protect trust and retention. Service quality compounds referrals and long-term AUM.</p><ul><li>Check pending queries and resolve before market close.</li><li>Send reassurance notes during volatility in calm language.</li><li>Update portfolio notes and next review dates.</li></ul></details><details class="dp-guide-card"><summary>Closer Mode</summary><p>Move warm intent into committed action through structured conversations.</p><ul><li>Call warm leads with clear agenda and outcome target.</li><li>Schedule meetings and document objections in PowerLog.</li><li>Discuss SIP discipline and portfolio strategy with evidence.</li></ul></details><details class="dp-guide-card"><summary>Evening Review</summary><p>Capture lessons while they are fresh. Reflection is how performance improves daily.</p><ul><li>Record wins, bottlenecks, and emotional triggers.</li><li>Convert insights into tomorrow's top 3 priorities.</li><li>Check if broadcast and follow-ups were completed.</li></ul></details></div></section>${zoneBlock('hunter','Hunter','Lead generation, prospecting, outbound outreach')} ${zoneBlock('guardian','Guardian','Client servicing, portfolio monitoring, relationship maintenance')} ${zoneBlock('closer','Closer','Meetings, investment discussions, conversions')}<section class="dp-calls"><h4>Call Suggestions from LeadFlow</h4><div class="dp-call-list">${calls.map(c=>`<div class="dp-call-card"><div><strong>${escHtml(c.name)}</strong><span>${escHtml(c.phone||'No phone saved')}</span></div><div><button onclick="dailyPulseLogCall(${JSON.stringify(c.name)})">Log Call</button><button onclick="dailyPulseLogNudge(${JSON.stringify(c.name)},'WhatsApp')">Log Nudge</button></div></div>`).join('')||'<div class="dp-empty">Add leads to get call recommendations.</div>'}</div></section><section class="dp-guide long"><h3>Guidance Cards · Text Coaching Modules</h3><details class="dp-guide-card" open><summary>How to Write a Great Broadcast Message</summary><p><strong>Purpose:</strong> Your daily market update is your most consistent trust-building ritual. Clients judge reliability through continuity, not occasional brilliance.</p><p><strong>Structure:</strong> Keep it 4-6 lines. Start with a factual market line, add context, and close with a calm investor lens.</p><p><strong>Example:</strong><br>📈 Markets today: Nifty +0.6% | Sensex at 79,240.<br>Mid & small caps outperformed.<br>RBI policy meet next week — markets watching closely.<br>Your SIPs are quietly accumulating units at today's price — that's the magic of staying invested.<br>🙏 — [Your Name]</p><p><strong>Tone Guidelines:</strong> calm, educational, steady. Never create panic, never create hype, never make guaranteed-return language.</p><p><strong>WhatsApp Tips:</strong> use 1-2 emojis, keep spacing clean, personalize with your own words, and send before 8 PM for best attention.</p><p><strong>What NOT to do:</strong> avoid phrases like “market is crashing” or “great time to buy now.” These push emotional decisions.</p></details><details class="dp-guide-card"><summary>How to Handle Volatility Conversations</summary><p>Use a 3-step script: acknowledge emotion, restate plan, suggest one practical next step. Example: “I understand the anxiety. Your allocation was built for phases like this. Let's do a 10-minute check-in tomorrow and review your SIP roadmap together.”</p></details><details class="dp-guide-card"><summary>How to Improve Conversion Quality</summary><p>Before every meeting, define one conversion objective, one proof point, and one objection response. After each discussion, immediately log decision signals in PowerLog and set the next dated action in LeadFlow.</p></details></section></div>`;
 }
 
 /* ══ DRAG & DROP ══ */
@@ -1916,6 +2263,9 @@ function renderAll(){
 /* ══ INIT ══ */
 function init(){
   loadAll();
+  migrateDailyTrackerV2();
+  loadKnowledgeLog();
+  loadInsightLog();
   applyTheme();
   const rd=$('review-date'); if(rd) rd.value=todayISO();
   renderAll();
