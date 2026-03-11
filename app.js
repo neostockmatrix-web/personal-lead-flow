@@ -1856,8 +1856,8 @@ function buildNudgeDots(){
     for(let i=0;i<total;i++){
       const dot=document.createElement('button');
       dot.type='button';
-      dot.className='nudge-dot'+(i<dtState.nudges[type]?' lit':'');
-      dot.style.setProperty('--nudge-color',NUDGE_CONFIG[type].color);
+      dot.className='ndot'+(i<dtState.nudges[type]?' lit':'');
+      dot.style.setProperty('--nc',NUDGE_CONFIG[type].color);
       dot.onclick=()=>nudgeTap(type,i);
       wrap.appendChild(dot);
     }
@@ -1875,7 +1875,11 @@ function updateNudgeCounts(){
     const curr=dtState.nudges[type]||0;
     const total=NUDGE_CONFIG[type].total;
     const c=$(type+'-count'); if(c) c.textContent=String(curr);
-    const d=$(type+'-done'); if(d) d.textContent=`${curr}/${total}`;
+    const d=$(type+'-done');
+    if(d){
+      d.textContent=`${curr}/${total}`;
+      d.style.display=curr>=total?'':'none';
+    }
   });
 }
 
@@ -1901,15 +1905,15 @@ function addBcGroupPrompt(){
   const row=$('bcGroups'); if(!row) return saveAll();
   const chip=document.createElement('button');
   chip.type='button';
-  chip.className='bc-group-chip'+(dtState.bcGroups[name]?' sent':'');
+  chip.className='group-tag'+(dtState.bcGroups[name]?' sent':'');
   chip.dataset.group=name;
-  chip.textContent=name;
+  chip.innerHTML='<span class="gtdot"></span>'+escHtml(name);
   chip.onclick=function(){toggleBcGroup(this);};
   row.insertBefore(chip,row.lastElementChild||null);
   saveAll();
 }
 function restoreBroadcast(){
-  const tg=$('broadcastToggle'); if(tg) tg.classList.toggle('active',!!dtState.broadcast);
+  const tg=$('bcToggle'); if(tg){tg.classList.toggle('on',!!dtState.broadcast); tg.textContent=dtState.broadcast?'✅ Broadcast Marked for Today':'Mark Broadcast Sent Today';}
   const ta=$('bcNote'); if(ta) ta.value=dtState.bcNote||'';
   const row=$('bcGroups');
   if(row){
@@ -1918,23 +1922,23 @@ function restoreBroadcast(){
       if(row.querySelector(`[data-group="${CSS.escape(k)}"]`)) return;
       const chip=document.createElement('button');
       chip.type='button';
-      chip.className='bc-group-chip'+(dtState.bcGroups[k]?' sent':'');
+      chip.className='group-tag'+(dtState.bcGroups[k]?' sent':'');
       chip.dataset.group=k;
-      chip.textContent=k;
+      chip.innerHTML='<span class="gtdot"></span>'+escHtml(k);
       chip.onclick=function(){toggleBcGroup(this);};
       row.insertBefore(chip,row.lastElementChild||null);
     });
   }
 }
-function updateStreak(){ const el=$('streakCount'); if(el) el.textContent=String(dtState.streak||0); }
+function updateStreak(){ const el=$('streakCount'); if(el) el.textContent=`${dtState.streak||0} days`; }
 
 function showCallInput(){
   const row=$('dpCallInputRow'); if(!row) return;
   row.classList.toggle('show');
-  const input=$('dpCallInput'); if(input && row.classList.contains('show')) input.focus();
+  const input=$('dpCallNameInput'); if(input && row.classList.contains('show')) input.focus();
 }
 function addCall(){
-  const input=$('dpCallInput');
+  const input=$('dpCallNameInput');
   const name=sanitize(input?.value||'');
   if(!name) return;
   dtState.calls.push({id:Date.now(),name,done:false,channel:dtState.newContactChannel||'wa'});
@@ -1962,7 +1966,7 @@ function renderCalls(){
   if(statEl) statEl.textContent=`${done}/${calls.length} completed`;
   if(emptyEl) emptyEl.style.display=calls.length?'none':'';
   if(!listEl) return;
-  listEl.innerHTML=calls.map(c=>`<div class="dp-call-item ${c.done?'done':''}" onclick="toggleCall('${c.id}')"><div><strong>${escHtml(c.name)}</strong><span class="badge">${c.channel==='wa'?'💬 WA':'📞 Call'}</span></div><div><span>${c.done?'Done':'Pending'}</span><button onclick="deleteCall('${c.id}',event)">✕</button></div></div>`).join('');
+  listEl.innerHTML=calls.map(c=>`<div class="dp-call-item ${c.done?'called':''}" onclick="toggleCall('${c.id}')"><div style="flex:1;"><div class="dp-call-name">${escHtml(c.name)}</div><span class="${c.channel==='wa'?'badge-wa':'badge-call'}">${c.channel==='wa'?'💬 WA':'📞 Call'}</span></div><div style="display:flex;align-items:center;gap:8px;"><span>${c.done?'Done':'Pending'}</span><button class="out-btn" onclick="deleteCall('${c.id}',event)">✕</button></div></div>`).join('');
 }
 
 function changeOutput(key,delta){
@@ -2027,7 +2031,7 @@ function buildScore(){
   for(let i=0;i<10;i++){
     const dot=document.createElement('button');
     dot.type='button';
-    dot.className='score-dot'+(i<dtState.score?' active':'');
+    dot.className='sdot'+(i<dtState.score?' active':'');
     dot.onclick=()=>setScore(i+1);
     track.appendChild(dot);
   }
@@ -2036,7 +2040,7 @@ function buildScore(){
 function setScore(n){
   dtState.score=Math.max(0,Math.min(10,Number(n)||0));
   saveAll();
-  const dots=[...document.querySelectorAll('#scoreTrack .score-dot')];
+  const dots=[...document.querySelectorAll('#scoreTrack .sdot')];
   dots.forEach((d,i)=>d.classList.toggle('active',i<dtState.score));
   updateScoreDisplay();
 }
@@ -2067,6 +2071,22 @@ function restoreBig3(){
   ['b3_1','b3_2','b3_3'].forEach((id,i)=>{const el=$(id); if(el) el.value=dtState.big3[i]||'';});
 }
 
+function setFollowupTab(tab){
+  const key=['mfd','life','health'].includes(tab)?tab:'mfd';
+  dtState.followupTab=key;
+  saveAll();
+  ['mfd','life','health'].forEach(k=>{
+    const b=$('fu-'+k);
+    if(b){
+      b.classList.remove('active-life','active-health','active-mfd');
+      b.classList.add('fu-tab');
+      if(k===key) b.classList.add('active-'+k);
+    }
+    const panel=$('fuGuide-'+k);
+    if(panel) panel.style.display=k===key?'':'none';
+  });
+}
+
 function setStudyProduct(p){
   dtState.studyProduct=sanitize(p||'general');
   saveAll();
@@ -2088,7 +2108,7 @@ function saveStudyEntry(){
 }
 function renderStudyLog(){
   const el=$('dpStudyLog'); if(!el) return;
-  el.innerHTML=knowledgeLog.slice(0,5).map(k=>`<div class="study-row"><strong>${escHtml(k.product||'general')}</strong> · ${escHtml(k.text||'')}</div>`).join('')||'';
+  el.innerHTML=knowledgeLog.slice(0,5).map(k=>`<div class="study-entry"><span class="se-date">${escHtml(k.date||'')}</span><strong>${escHtml(k.product||'general')}</strong> · ${escHtml(k.text||'')}</div>`).join('')||'';
 }
 
 function saveInsight(){
@@ -2106,7 +2126,7 @@ function saveInsight(){
 }
 function renderInsightPrev(){
   const el=$('dpInsightPrev'); if(!el) return;
-  el.innerHTML=insightLog.slice(0,4).map(i=>`<div class="insight-row">${escHtml(i.text||'')}</div>`).join('')||'';
+  el.innerHTML=insightLog.slice(0,4).map(i=>`<div class="insight-prev-item"><span class="ipdate">${escHtml(i.date||'')}</span>${escHtml(i.text||'')}</div>`).join('')||'';
 }
 
 function dailyPulseSetReview(field,value){
@@ -2200,8 +2220,104 @@ function renderDailyPulse(){
   const host=$('dailyPulseView'); if(!host) return;
   const calls=getLeadCallSuggestions();
   const zoneBlock=(zone,title,desc)=>`<section class="dp-zone"><div class="dp-zone-head"><h4>${title}</h4><p>${desc}</p></div><div class="dp-task-add"><input id="${zone}TaskInput" placeholder="Add ${title} task (use #ClientName to auto-link lead history)"><button onclick="dailyPulseAddTask('${zone}')">Add</button></div><div class="dp-task-list">${(dtState[zone+'Tasks']||[]).map(t=>`<label class="dp-task-card ${t.done?'done':''}"><input type="checkbox" ${t.done?'checked':''} onchange="dailyPulseToggleTask('${zone}','${t.id}')"><div><div class="dp-task-text">${escHtml(t.text)}</div><div class="dp-task-meta">${t.doneAt?'Completed '+fmtDateTime(t.doneAt):'Pending'}</div></div></label>`).join('')||'<div class="dp-empty">No tasks yet.</div>'}</div></section>`;
-  const totalNudges=(dtState.nudges.mfd||0)+(dtState.nudges.life||0)+(dtState.nudges.health||0);
-  host.innerHTML=`<div class="daily-pulse-grid"><section class="dp-overview"><div class="dp-ring" style="--progress:${dtState.progress};"><div><strong>${dtState.progress}%</strong><span>Daily Completion</span></div></div><div class="dp-counters"><button onclick="dailyPulseLogCall('General Follow-up')">📞 Calls: ${(dtState.calls||[]).length}</button><button onclick="dailyPulseLogNudge('Broadcast','WhatsApp')">💬 Nudges: ${totalNudges}</button><button onclick="dailyPulseToggleStudyDone()">📚 Study: ${dtState.studyDone?'Done':'Pending'}</button></div><div class="dp-review"><textarea placeholder="Wins captured today..." oninput="dailyPulseSetReview('reviewWins',this.value)">${escHtml(dtState.reviewWins)}</textarea><textarea placeholder="Challenges and blockers..." oninput="dailyPulseSetReview('reviewChallenges',this.value)">${escHtml(dtState.reviewChallenges)}</textarea></div></section><section class="dp-guide"><h3>Advisor Workflow Guidance</h3><div class="dp-guide-list"><details class="dp-guide-card" open><summary>Morning Setup</summary><p>Start with clarity. Review today's non-negotiables, check follow-up commitments, scan pending service issues, and set one primary conversion objective.</p><ul><li>Review your top 5 priority leads and note exact next action.</li><li>Prepare your market broadcast draft before noon.</li><li>Block your calendar for Hunter, Guardian, and Closer windows.</li><li>Select 3 clients that need confidence-building communication.</li></ul></details><details class="dp-guide-card"><summary>Hunter Mode</summary><p>This is pure pipeline building. Prospect, reconnect and generate new conversations with consistency.</p><ul><li>Send 5 personalized WhatsApp nudges.</li><li>Reconnect with old leads using contextual hooks.</li><li>Add at least 1 new prospect into LeadFlow with clear stage.</li></ul></details><details class="dp-guide-card"><summary>Guardian Mode</summary><p>Protect trust and retention. Service quality compounds referrals and long-term AUM.</p><ul><li>Check pending queries and resolve before market close.</li><li>Send reassurance notes during volatility in calm language.</li><li>Update portfolio notes and next review dates.</li></ul></details><details class="dp-guide-card"><summary>Closer Mode</summary><p>Move warm intent into committed action through structured conversations.</p><ul><li>Call warm leads with clear agenda and outcome target.</li><li>Schedule meetings and document objections in PowerLog.</li><li>Discuss SIP discipline and portfolio strategy with evidence.</li></ul></details><details class="dp-guide-card"><summary>Evening Review</summary><p>Capture lessons while they are fresh. Reflection is how performance improves daily.</p><ul><li>Record wins, bottlenecks, and emotional triggers.</li><li>Convert insights into tomorrow's top 3 priorities.</li><li>Check if broadcast and follow-ups were completed.</li></ul></details></div></section>${zoneBlock('hunter','Hunter','Lead generation, prospecting, outbound outreach')} ${zoneBlock('guardian','Guardian','Client servicing, portfolio monitoring, relationship maintenance')} ${zoneBlock('closer','Closer','Meetings, investment discussions, conversions')}<section class="dp-calls"><h4>Call Suggestions from LeadFlow</h4><div class="dp-call-list">${calls.map(c=>`<div class="dp-call-card"><div><strong>${escHtml(c.name)}</strong><span>${escHtml(c.phone||'No phone saved')}</span></div><div><button onclick="dailyPulseLogCall(${JSON.stringify(c.name)})">Log Call</button><button onclick="dailyPulseLogNudge(${JSON.stringify(c.name)},'WhatsApp')">Log Nudge</button></div></div>`).join('')||'<div class="dp-empty">Add leads to get call recommendations.</div>'}</div></section><section class="dp-guide long"><h3>Guidance Cards · Text Coaching Modules</h3><details class="dp-guide-card" open><summary>How to Write a Great Broadcast Message</summary><p><strong>Purpose:</strong> Your daily market update is your most consistent trust-building ritual. Clients judge reliability through continuity, not occasional brilliance.</p><p><strong>Structure:</strong> Keep it 4-6 lines. Start with a factual market line, add context, and close with a calm investor lens.</p><p><strong>Example:</strong><br>📈 Markets today: Nifty +0.6% | Sensex at 79,240.<br>Mid & small caps outperformed.<br>RBI policy meet next week — markets watching closely.<br>Your SIPs are quietly accumulating units at today's price — that's the magic of staying invested.<br>🙏 — [Your Name]</p><p><strong>Tone Guidelines:</strong> calm, educational, steady. Never create panic, never create hype, never make guaranteed-return language.</p><p><strong>WhatsApp Tips:</strong> use 1-2 emojis, keep spacing clean, personalize with your own words, and send before 8 PM for best attention.</p><p><strong>What NOT to do:</strong> avoid phrases like “market is crashing” or “great time to buy now.” These push emotional decisions.</p></details><details class="dp-guide-card"><summary>How to Handle Volatility Conversations</summary><p>Use a 3-step script: acknowledge emotion, restate plan, suggest one practical next step. Example: “I understand the anxiety. Your allocation was built for phases like this. Let's do a 10-minute check-in tomorrow and review your SIP roadmap together.”</p></details><details class="dp-guide-card"><summary>How to Improve Conversion Quality</summary><p>Before every meeting, define one conversion objective, one proof point, and one objection response. After each discussion, immediately log decision signals in PowerLog and set the next dated action in LeadFlow.</p></details></section></div>`;
+
+  host.innerHTML=`<div class="daily-pulse-grid">
+    <section class="dp-overview">
+      <div class="dp-ring" style="--progress:${dtState.progress};"><div><strong>${dtState.progress}%</strong><span>Daily Completion</span></div></div>
+    </section>
+
+    <section class="dp-zone">
+      <h3>🎯 Big 3 Priorities</h3>
+      <label>#1 High Priority</label><input id="b3_1" class="b3-input" value="${escHtml(dtState.big3?.[0]||'')}" oninput="dtState.big3[0]=this.value;saveAll()">
+      <label>#2 Medium</label><input id="b3_2" class="b3-input" value="${escHtml(dtState.big3?.[1]||'')}" oninput="dtState.big3[1]=this.value;saveAll()">
+      <label>#3 Low</label><input id="b3_3" class="b3-input" value="${escHtml(dtState.big3?.[2]||'')}" oninput="dtState.big3[2]=this.value;saveAll()">
+      <button onclick="saveBig3()">Save Big 3</button> <span id="b3SavedMsg"></span>
+    </section>
+
+    ${zoneBlock('hunter','Hunter','Lead generation, prospecting, outbound outreach')}
+    ${zoneBlock('guardian','Guardian','Client servicing, portfolio monitoring, relationship maintenance')}
+    ${zoneBlock('closer','Closer','Meetings, investment discussions, conversions')}
+
+    <section class="dp-zone">
+      <h3>💬 Nudge Counters</h3>
+      <div class="dp-nudge-row"><strong>MFD</strong><div class="dp-nudge-dots" id="mfd-dots"></div><span id="mfd-count">0</span><span class="dp-nudge-done" id="mfd-done">0/5</span></div>
+      <div class="dp-nudge-row"><strong>Life</strong><div class="dp-nudge-dots" id="life-dots"></div><span id="life-count">0</span><span class="dp-nudge-done" id="life-done">0/3</span></div>
+      <div class="dp-nudge-row"><strong>Health</strong><div class="dp-nudge-dots" id="health-dots"></div><span id="health-count">0</span><span class="dp-nudge-done" id="health-done">0/2</span></div>
+    </section>
+
+    <section class="dp-zone">
+      <h3>📢 Broadcast Tracker</h3>
+      <button id="bcToggle" class="bc-toggle" onclick="toggleBroadcast()">Mark Broadcast Sent Today</button>
+      <div class="bc-groups" id="bcGroups">
+        <button class="group-tag" data-group="MFD Clients" onclick="toggleBcGroup(this)"><span class="gtdot"></span>MFD Clients</button>
+        <button class="group-tag" data-group="Prospects" onclick="toggleBcGroup(this)"><span class="gtdot"></span>Prospects</button>
+        <button class="group-tag" data-group="Referrals" onclick="toggleBcGroup(this)"><span class="gtdot"></span>Referrals</button>
+        <button class="group-tag" data-group="Insurance Clients" onclick="toggleBcGroup(this)"><span class="gtdot"></span>Insurance Clients</button>
+        <button class="group-tag" onclick="addBcGroupPrompt()">+ Add Group</button>
+      </div>
+      <textarea id="bcNote" placeholder="Broadcast note..." oninput="dtState.bcNote=this.value;saveAll()">${escHtml(dtState.bcNote||'')}</textarea>
+      <div>🔥 Streak: <span id="streakCount">0 days</span></div>
+    </section>
+
+    <section class="dp-zone">
+      <h3>📞 Personal Call List</h3>
+      <div id="dpCallStats"></div>
+      <button onclick="showCallInput()">+ Add Call</button>
+      <div id="dpCallInputRow" class="dp-task-add">
+        <input id="dpCallNameInput" placeholder="Contact name">
+        <button class="sptab" onclick="dtState.newContactChannel='wa';saveAll()">WA</button>
+        <button class="sptab" onclick="dtState.newContactChannel='call';saveAll()">Call</button>
+        <button onclick="addCall()">Add</button>
+      </div>
+      <div id="dpCallList"></div>
+      <div id="dpEmptyCallsMsg" class="dp-empty">No personal calls yet.</div>
+    </section>
+
+    <section class="dp-calls"><h4>Call Suggestions from LeadFlow</h4><div class="dp-call-list">${calls.map(c=>`<div class="dp-call-card"><div><strong>${escHtml(c.name)}</strong><span>${escHtml(c.phone||'No phone saved')}</span></div><div><button onclick="dailyPulseLogCall(${JSON.stringify(c.name)})">Log Call</button><button onclick="dailyPulseLogNudge(${JSON.stringify(c.name)},'WhatsApp')">Log Nudge</button></div></div>`).join('')||'<div class="dp-empty">Add leads to get call recommendations.</div>'}</div></section>
+
+    <section class="dp-zone">
+      <h3>📊 Output Counters</h3>
+      <div class="out-row"><span>WA Messages</span><div><button class="out-btn" onclick="changeOutput('wa',-1)">−</button><span class="out-val" id="out-wa">0</span><button class="out-btn" onclick="changeOutput('wa',1)">+</button></div></div>
+      <div class="out-row"><span>Calls Made</span><div><button class="out-btn" onclick="changeOutput('calls',-1)">−</button><span class="out-val" id="out-calls">0</span><button class="out-btn" onclick="changeOutput('calls',1)">+</button></div></div>
+      <div class="out-row"><span>Meetings Done</span><div><button class="out-btn" onclick="changeOutput('meetings',-1)">−</button><span class="out-val" id="out-meetings">0</span><button class="out-btn" onclick="changeOutput('meetings',1)">+</button></div></div>
+      <div class="out-row"><span>Proposals Sent</span><div><button class="out-btn" onclick="changeOutput('proposals',-1)">−</button><span class="out-val" id="out-proposals">0</span><button class="out-btn" onclick="changeOutput('proposals',1)">+</button></div></div>
+      <div class="out-row"><span>Deals Closed</span><div><button class="out-btn" onclick="changeOutput('deals',-1)">−</button><span class="out-val" id="out-deals">0</span><button class="out-btn" onclick="changeOutput('deals',1)">+</button></div></div>
+      <div id="outputInsight"></div>
+    </section>
+
+    <section class="dp-zone"><h3>💰 Money Moves</h3><div>Score: <span id="mmScore">0</span> · <span id="mmMsg"></span></div>
+      ${[
+        ['ask-referral','💬 Asked for a referral today'],['sip-topup','📈 Discussed SIP top-up with a client'],['insurance-mention','🛡️ Mentioned life/health insurance to a prospect'],['proposal-followup','💰 Followed up on a pending proposal'],['portfolio-review','🔄 Reviewed a client portfolio and suggested action'],['cold-call','📞 Made a call to a new contact']
+      ].map(([k,t])=>`<div class="money-move" data-move="${k}" onclick="toggleMove(this)"><div class="mm-check"><svg width="12" height="12" viewBox="0 0 24 24" style="opacity:0"><path fill="none" stroke="currentColor" stroke-width="3" d="M5 13l4 4L19 7"/></svg></div><div>${t}</div></div>`).join('')}
+    </section>
+
+    <section class="dp-guide"><h3>📚 Follow-up Guides</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;"><button id="fu-mfd" class="fu-tab" onclick="setFollowupTab('mfd')">MFD</button><button id="fu-life" class="fu-tab" onclick="setFollowupTab('life')">Life</button><button id="fu-health" class="fu-tab" onclick="setFollowupTab('health')">Health</button></div>
+      <div id="fuGuide-mfd"><details class="dp-guide-card" open><summary>SIP Reassurance</summary><p>Markets are down — your SIP is buying more units at lower NAV. This is exactly when compounding works hardest for you.</p></details><details class="dp-guide-card"><summary>Volatility Script</summary><p>Your SIP is not a bet — it's a discipline. Every month you stay invested, you're building a habit that most people break and regret.</p></details><details class="dp-guide-card"><summary>Lumpsum Nudge</summary><p>Do you have idle money in savings or FD earning 6%? Inflation is silently eroding it. Let's put it to work in a liquid or short-duration fund.</p></details><details class="dp-guide-card"><summary>Review Prompt</summary><p>When did we last review your asset allocation? Markets move, goals shift — a 15-minute review could make a real difference.</p></details><details class="dp-guide-card"><summary>New Contact Opener</summary><p>I help families build wealth through disciplined mutual fund investing. Can I share one insight that changed how my clients think about money?</p></details><details class="dp-guide-card"><summary>Objection — Already Investing</summary><p>That's great! But are your funds aligned to your actual goals — child's education, retirement, house? Most people invest without a mapped plan.</p></details></div>
+      <div id="fuGuide-life"><details class="dp-guide-card" open><summary>Coverage Check</summary><p>Is your life cover at least 15-20x your annual income? Most people are dangerously underinsured without realising it.</p></details><details class="dp-guide-card"><summary>Term Plan Pitch</summary><p>Pure term insurance is the most responsible financial decision a breadwinner can make. ₹1 Crore cover for under ₹1000/month — your family's safety net.</p></details><details class="dp-guide-card"><summary>Objection — Office Cover</summary><p>Company cover stops the day you resign, retire, or get laid off. Your family's protection cannot depend on your job status.</p></details><details class="dp-guide-card"><summary>TROP Opener</summary><p>What if your insurance returned every rupee you paid, if nothing happens? That's a Term Return of Premium plan — zero-cost protection.</p></details><details class="dp-guide-card"><summary>Claim Story Reminder</summary><p>Before your next meeting — recall one claim story. How a settlement changed a family's life. Emotion closes protection policies, not features.</p></details><details class="dp-guide-card"><summary>Young Client Objection</summary><p>You're young and healthy — which is exactly why you get the best premium today. Every year you wait, it gets more expensive or harder to get.</p></details></div>
+      <div id="fuGuide-health"><details class="dp-guide-card" open><summary>Medical Inflation Script</summary><p>Healthcare costs rise 14% every year. A hospitalization costing ₹2L today will cost ₹8L in 10 years. Insurance is not an expense — it's a hedge.</p></details><details class="dp-guide-card"><summary>Family Floater Pitch</summary><p>One policy covers the whole family. If your parents are uninsured, this is urgent — not optional. Pre-existing conditions only get harder to cover with age.</p></details><details class="dp-guide-card"><summary>Young & Healthy Objection</summary><p>That's the perfect time to buy. Once you have a pre-existing condition, premiums spike or coverage gets denied. Lock in your health today.</p></details><details class="dp-guide-card"><summary>Super Top-Up</summary><p>Already have a base cover of ₹5L? A super top-up gives you ₹50L additional protection for under ₹5000/year. Most people don't know this exists.</p></details><details class="dp-guide-card"><summary>Renewal Nudge</summary><p>Please never let your health policy lapse — you lose your no-claim bonus, continuity benefits, and may need a fresh waiting period for pre-existing conditions.</p></details><details class="dp-guide-card"><summary>Corporate Cover Gap</summary><p>Your employer's group cover has a shared family limit, no room rent waiver control, and zero portability. It's a base — not a plan.</p></details></div>
+    </section>
+
+    <section class="dp-zone"><h3>📖 Knowledge Log</h3><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;"><button id="sptab-life" class="sptab" onclick="setStudyProduct('life')">Life</button><button id="sptab-health" class="sptab" onclick="setStudyProduct('health')">Health</button><button id="sptab-mfd" class="sptab" onclick="setStudyProduct('mfd')">MFD</button><button id="sptab-general" class="sptab" onclick="setStudyProduct('general')">General</button></div><textarea id="dpStudyInput" placeholder="What did you learn or read today?"></textarea><div style="display:flex;gap:8px;margin-top:8px;"><button onclick="saveStudyEntry()">Save Study</button><button onclick="dailyPulseToggleStudyDone()">Study Done: ${dtState.studyDone?'Yes':'No'}</button></div><div id="dpStudyLog"></div></section>
+
+    <section class="dp-zone"><h3>💡 Insight of the Day</h3><textarea id="dpInsightField" placeholder="What is your key insight or lesson from today?"></textarea><button onclick="saveInsight()">Save Insight</button><div id="dpInsightPrev"></div></section>
+
+    <section class="dp-zone"><h3>🌗 Day Score + Review</h3><div id="scoreTrack" class="score-track"></div><div>Score: <span id="scoreCurrent">0</span> · <span id="scoreMsg"></span></div><div class="dp-review"><textarea placeholder="Wins captured today..." oninput="dailyPulseSetReview('reviewWins',this.value)">${escHtml(dtState.reviewWins)}</textarea><textarea placeholder="Challenges and blockers..." oninput="dailyPulseSetReview('reviewChallenges',this.value)">${escHtml(dtState.reviewChallenges)}</textarea></div></section>
+
+    <section class="dp-guide long"><h3>Advisor Workflow Guidance</h3><div class="dp-guide-list"><details class="dp-guide-card" open><summary>Morning Setup</summary><p>Start with clarity. Review today's non-negotiables, check follow-up commitments, scan pending service issues, and set one primary conversion objective.</p><ul><li>Review your top 5 priority leads and note exact next action.</li><li>Prepare your market broadcast draft before noon.</li><li>Block your calendar for Hunter, Guardian, and Closer windows.</li><li>Select 3 clients that need confidence-building communication.</li></ul></details><details class="dp-guide-card"><summary>Hunter Mode</summary><p>This is pure pipeline building. Prospect, reconnect and generate new conversations with consistency.</p><ul><li>Send 5 personalized WhatsApp nudges.</li><li>Reconnect with old leads using contextual hooks.</li><li>Add at least 1 new prospect into LeadFlow with clear stage.</li></ul></details><details class="dp-guide-card"><summary>Guardian Mode</summary><p>Protect trust and retention. Service quality compounds referrals and long-term AUM.</p><ul><li>Check pending queries and resolve before market close.</li><li>Send reassurance notes during volatility in calm language.</li><li>Update portfolio notes and next review dates.</li></ul></details><details class="dp-guide-card"><summary>Closer Mode</summary><p>Move warm intent into committed action through structured conversations.</p><ul><li>Call warm leads with clear agenda and outcome target.</li><li>Schedule meetings and document objections in PowerLog.</li><li>Discuss SIP discipline and portfolio strategy with evidence.</li></ul></details><details class="dp-guide-card"><summary>Evening Review</summary><p>Capture lessons while they are fresh. Reflection is how performance improves daily.</p><ul><li>Record wins, bottlenecks, and emotional triggers.</li><li>Convert insights into tomorrow's top 3 priorities.</li><li>Check if broadcast and follow-ups were completed.</li></ul></details></div></section>
+  </div>`;
+
+  buildNudgeDots();
+  restoreBroadcast();
+  updateStreak();
+  renderCalls();
+  renderOutput();
+  restoreMoneyMoves();
+  setFollowupTab(dtState.followupTab||'mfd');
+  setStudyProduct(dtState.studyProduct||'general');
+  renderStudyLog();
+  renderInsightPrev();
+  buildScore();
 }
 
 /* ══ DRAG & DROP ══ */

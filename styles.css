@@ -461,3 +461,56 @@ body[data-theme='dark'] .lead-card{background:var(--surface2);}
 .dp-call-card{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:8px;border:1px solid var(--border);background:var(--surface2);border-radius:8px;}
 .dp-call-card span{display:block;font-size:.68rem;color:var(--text-muted);}
 .dp-empty{font-size:.72rem;color:var(--text-muted);padding:8px;border:1px dashed var(--border);border-radius:8px;}
+
+/* Nudges */
+.dp-nudge-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border2);}
+.dp-nudge-dots{display:flex;gap:6px;}
+.ndot{width:18px;height:18px;border-radius:50%;border:2px solid var(--nc);cursor:pointer;transition:background 0.15s;}
+.ndot.lit{background:var(--nc);}
+.dp-nudge-done{display:none;font-size:11px;background:var(--green);color:#000;border-radius:4px;padding:2px 6px;font-weight:600;}
+
+/* Broadcast */
+.bc-toggle{width:100%;padding:12px;border-radius:8px;background:var(--bg3);border:1px solid var(--border2);color:var(--text1);cursor:pointer;font-size:14px;transition:all 0.2s;}
+.bc-toggle.on{background:var(--green);color:#000;font-weight:600;}
+.bc-groups{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;}
+.group-tag{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;border:1px solid var(--border2);cursor:pointer;font-size:12px;color:var(--text2);}
+.group-tag.sent{border-color:var(--green);color:var(--green);}
+.gtdot{width:6px;height:6px;border-radius:50%;background:currentColor;}
+
+/* Call List */
+.dp-call-item{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg3);border-radius:8px;cursor:pointer;margin-bottom:6px;border:1px solid var(--border2);}
+.dp-call-item.called{opacity:0.5;}
+.dp-call-item.called .dp-call-name{text-decoration:line-through;}
+.badge-wa{font-size:11px;padding:2px 8px;border-radius:10px;background:rgba(59,130,246,0.15);color:var(--blue);}
+.badge-call{font-size:11px;padding:2px 8px;border-radius:10px;background:rgba(212,175,55,0.15);color:var(--gold);}
+
+/* Output */
+.out-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border2);}
+.out-val{font-size:22px;font-weight:700;color:var(--gold);min-width:36px;text-align:center;}
+.out-val.nonzero{color:var(--green);}
+.out-btn{width:30px;height:30px;border-radius:6px;background:var(--bg3);border:1px solid var(--border2);font-size:16px;cursor:pointer;color:var(--text1);}
+
+/* Money Moves */
+.money-move{display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg3);border-radius:10px;cursor:pointer;border:1px solid var(--border2);margin-bottom:8px;transition:all 0.2s;}
+.money-move.done{border-color:var(--green);background:rgba(39,174,96,0.08);}
+.mm-check{width:20px;height:20px;border-radius:50%;border:2px solid var(--border2);flex-shrink:0;display:grid;place-items:center;transition:all 0.2s;}
+.money-move.done .mm-check{background:var(--green);border-color:var(--green);}
+
+/* Score */
+.score-track{display:flex;gap:6px;flex-wrap:wrap;}
+.sdot{width:34px;height:34px;border-radius:50%;border:2px solid var(--border2);cursor:pointer;display:grid;place-items:center;font-size:12px;color:var(--text2);transition:all 0.15s;}
+.sdot.active{background:var(--gold);border-color:var(--gold);color:#000;font-weight:700;}
+
+/* Big 3 */
+.b3-input{width:100%;padding:10px;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;color:var(--text1);font-size:14px;margin-bottom:8px;box-sizing:border-box;}
+
+/* Study & Insight */
+.sptab,.fu-tab{padding:6px 14px;border-radius:6px;border:1px solid var(--border2);cursor:pointer;font-size:12px;background:transparent;color:var(--text2);}
+.sptab.active-life,.fu-tab.active-life{border-color:var(--blue);color:var(--blue);}
+.sptab.active-health,.fu-tab.active-health{border-color:var(--teal);color:var(--teal);}
+.sptab.active-mfd,.fu-tab.active-mfd{border-color:var(--gold);color:var(--gold);}
+.sptab.active-general{border-color:var(--text2);color:var(--text1);}
+.study-entry,.insight-prev-item{padding:8px 10px;margin-bottom:6px;font-size:13px;color:var(--text2);border-radius:6px;background:var(--bg3);}
+.study-entry{border-left:3px solid var(--teal);}
+.insight-prev-item{border-left:3px solid var(--gold);}
+.ipdate,.se-date{font-size:11px;color:var(--text2);margin-right:8px;opacity:0.7;}
