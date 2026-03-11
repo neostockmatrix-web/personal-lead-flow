@@ -413,6 +413,12 @@ function exportLeadCSV(){
 
 /* ══ TAB SYSTEM ══ */
 function switchTab(name){
+  const leavingDaily=!!document.querySelector('#tab-daily-pulse.active') && name!=='daily-pulse';
+  if(leavingDaily && typeof dailyPulseSaveReview==='function'){
+    const w=sanitize(dtState?.reviewWins||'');
+    const c=sanitize(dtState?.reviewChallenges||'');
+    if(w&&c) dailyPulseSaveReview(true);
+  }
   document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('#main-tab-nav .tab-btn').forEach(b=>b.classList.remove('active'));
   const pane=$('tab-'+name); if(pane) pane.classList.add('active');
@@ -1311,7 +1317,9 @@ function renderPipeline(){
       if(l.nextAction===today && !l.muted && !l.deletedAt) todays.push(l.name);
       const cardStatus=leadCardStatus(l);
       const ageClass=daysIn<7?'age-fresh':daysIn<21?'age-watch':'age-risk';
-      const activityScore=Math.min(100,((l.history||[]).length*8)+((entries.filter(e=>(e.linkedLeadIds||[]).includes(l.id)).length)*6)+(l.nextAction?10:0)-(isOverdue?20:0));
+      const activityScore=Math.max(0,Math.min(100,((l.history||[]).length*8)+((entries.filter(e=>(e.linkedLeadIds||[]).includes(l.id)).length)*6)+(l.nextAction?10:0)-(isOverdue?20:0)));
+      const aiColor=activityScore>=70?'#22c55e':activityScore>=40?'#f59e0b':'#ef4444';
+      const aiLabel=activityScore>=70?'High':activityScore>=40?'Medium':'Low';
       const isPartial=cardStatus==='partial';
       const prodRows=(l.products||[]).map((p,pi)=>`
         <div class="product-row prod-${p.status}">
@@ -1340,7 +1348,7 @@ function renderPipeline(){
             <button class="icon-btn" onclick="event.stopPropagation();toggleLeadMute('${escHtml(l.id)}')" title="Mute alerts">${l.muted?'🔕':'🔔'}</button>
           </div>
         </div>
-        <div class="lead-value">${valDisplay}</div><div style="font-size:.64rem;color:var(--text-muted);margin-bottom:4px;">Attention Index: ${activityScore}</div>
+        <div class="lead-value">${valDisplay}</div><div class="attention-index-row"><span class="ai-label">Attention Index</span><div class="ai-bar-wrap"><div class="ai-bar-fill" style="width:${activityScore}%;background:${aiColor};"></div></div><span class="ai-score" style="color:${aiColor};">${activityScore}</span><span class="ai-tag" style="color:${aiColor};">${aiLabel}</span></div><div class="ai-formula-hint">History×8 + Log links×6 + Next action+10 − Overdue−20</div>
         <div>${prodRows}</div>
         <div class="tag-row">
           <span class="lead-tag source-tag">${escHtml(l.source)}</span>
@@ -1365,6 +1373,14 @@ function renderPipeline(){
         <div class="compact-hint">Tap for full details</div>
       </div>`;
     }).join('');
+    const stageCol=$(stage);
+    if(stageCol){
+      stageCol.querySelectorAll('.age-legend').forEach(el=>el.remove());
+      const colHeader=stageCol.querySelector('.col-header');
+      if(colHeader){
+        colHeader.insertAdjacentHTML('afterend','<div class="age-legend"><span style="color:#16a34a;">● Fresh &lt;7d</span><span style="color:#d97706;">● Watch 7-21d</span><span style="color:#dc2626;">● Risk 21d+</span></div>');
+      }
+    }
   });
   const b=$('followUpBanner');
   if(b){if(todays.length){b.style.display='block';b.innerHTML=`🔔 <strong>Today's Follow-ups (${todays.length}):</strong> ${todays.join(' · ')}`;}else b.style.display='none';}
@@ -1881,13 +1897,18 @@ function nudgeTap(type,idx){
 }
 function updateNudgeCounts(){
   Object.keys(NUDGE_CONFIG).forEach(type=>{
-    const curr=dtState.nudges[type]||0;
-    const total=NUDGE_CONFIG[type].total;
-    const c=$(type+'-count'); if(c) c.textContent=String(curr);
-    const d=$(type+'-done');
-    if(d){
-      d.textContent=`${curr}/${total}`;
-      d.style.display=curr>=total?'':'none';
+    const cfg=NUDGE_CONFIG[type];
+    const n=dtState.nudges[type]||0;
+    const countEl=$(type+'-count');
+    const doneEl=$(type+'-done');
+    if(countEl){
+      countEl.textContent=`${n} / ${cfg.total}`;
+      countEl.style.color = n===cfg.total ? '#22c55e' : n>0 ? '#f59e0b' : '#64748b';
+      countEl.style.fontWeight = n>0 ? '700' : '400';
+    }
+    if(doneEl){
+      doneEl.style.display = n===cfg.total ? 'inline-block' : 'none';
+      doneEl.textContent = '✅ Done';
     }
   });
 }
@@ -1978,7 +1999,7 @@ function renderCalls(){
   const calls=Array.isArray(dtState.calls)?dtState.calls:[];
   const done=calls.filter(c=>c.done).length;
   if(statEl) statEl.textContent=`${done}/${calls.length} completed`;
-  if(emptyEl) emptyEl.style.display=calls.length?'none':'';
+  if(emptyEl) emptyEl.style.display = dtState.calls.length ? 'none' : 'block';
   if(!listEl) return;
   listEl.innerHTML=calls.map(c=>`<div class="dp-call-item ${c.done?'called':''}" onclick="toggleCall('${c.id}')"><div style="flex:1;"><div class="dp-call-name">${escHtml(c.name)} ${c.leadId?`<span class="log-link-badge" onclick="event.stopPropagation();jumpToLead('${escHtml(c.leadId)}')" title="View in LeadFlow">🔗</span>`:''}</div><span class="${c.channel==='wa'?'badge-wa':'badge-call'}">${c.channel==='wa'?'💬 WA':'📞 Call'}</span></div><div style="display:flex;align-items:center;gap:8px;"><span class="dp-call-status">${c.done?'Done':'Pending'}</span><button class="out-btn" onclick="deleteCall('${c.id}',event)">✕</button></div></div>`).join('');
 }
@@ -2163,13 +2184,17 @@ function dailyPulseSetReview(field,value){
   saveAll();
 }
 
-function dailyPulseSaveReview(){
+function dailyPulseSaveReview(silent=false){
   const wins=sanitize(dtState.reviewWins||'');
   const challenges=sanitize(dtState.reviewChallenges||'');
   if(!wins && !challenges) return;
+  const sig=(wins+'|'+challenges).toLowerCase();
+  if(dtState.lastReviewSig===sig) return;
+  dtState.lastReviewSig=sig;
   entries.unshift({id:'dpr-'+Date.now(),text:'🌗 REVIEW: Wins — '+(wins||'-')+' | Challenges — '+(challenges||'-'),type:'Note',tags:['review'],sourceType:'daily-review',date:new Date().toISOString(),dateShort:fmtDate(Date.now()),energy:3,done:false,priority:null,reminder:null,linkedLeadId:'',linkedLeadIds:[],linkedTaskId:null});
   saveAll();
   renderEntries();
+  if(!silent) renderDailyPulse();
 }
 
 function dailyPulseAddTask(zone){
@@ -2246,7 +2271,18 @@ function dailyPulseToggleStudyDone(){
 }
 
 function getLeadCallSuggestions(){
-  const leadPool=(state.leads||[]).filter(l=>!l.deletedAt).slice().sort((a,b)=>((b.history||[]).length-(a.history||[]).length));
+  const leadPool=(state.leads||[])
+    .filter(l=>!l.deletedAt)
+    .slice()
+    .sort((a,b)=>{
+      const aOverdue=a.nextAction&&a.nextAction<=todayISO()?1:0;
+      const bOverdue=b.nextAction&&b.nextAction<=todayISO()?1:0;
+      if(bOverdue!==aOverdue) return bOverdue-aOverdue;
+      const aHot=a.temp==='hot'?1:0;
+      const bHot=b.temp==='hot'?1:0;
+      if(bHot!==aHot) return bHot-aHot;
+      return (b.history||[]).length-(a.history||[]).length;
+    });
   return leadPool.slice(0,8).map(l=>({id:l.id,name:l.name,phone:l.phone||''}));
 }
 
@@ -2344,6 +2380,7 @@ function renderDailyPulse(){
     <section class="dp-guide long"><h3>Advisor Workflow Guidance</h3><div class="dp-guide-list"><details class="dp-guide-card" open><summary>Morning Setup</summary><p>Start with clarity. Review today's non-negotiables, check follow-up commitments, scan pending service issues, and set one primary conversion objective.</p><ul><li>Review your top 5 priority leads and note exact next action.</li><li>Prepare your market broadcast draft before noon.</li><li>Block your calendar for Hunter, Guardian, and Closer windows.</li><li>Select 3 clients that need confidence-building communication.</li></ul></details><details class="dp-guide-card"><summary>Hunter Mode</summary><p>This is pure pipeline building. Prospect, reconnect and generate new conversations with consistency.</p><ul><li>Send 5 personalized WhatsApp nudges.</li><li>Reconnect with old leads using contextual hooks.</li><li>Add at least 1 new prospect into LeadFlow with clear stage.</li></ul></details><details class="dp-guide-card"><summary>Guardian Mode</summary><p>Protect trust and retention. Service quality compounds referrals and long-term AUM.</p><ul><li>Check pending queries and resolve before market close.</li><li>Send reassurance notes during volatility in calm language.</li><li>Update portfolio notes and next review dates.</li></ul></details><details class="dp-guide-card"><summary>Closer Mode</summary><p>Move warm intent into committed action through structured conversations.</p><ul><li>Call warm leads with clear agenda and outcome target.</li><li>Schedule meetings and document objections in PowerLog.</li><li>Discuss SIP discipline and portfolio strategy with evidence.</li></ul></details><details class="dp-guide-card"><summary>Evening Review</summary><p>Capture lessons while they are fresh. Reflection is how performance improves daily.</p><ul><li>Record wins, bottlenecks, and emotional triggers.</li><li>Convert insights into tomorrow's top 3 priorities.</li><li>Check if broadcast and follow-ups were completed.</li></ul></details></div></section>
   </div>`;
 
+  restoreBig3();
   buildNudgeDots();
   restoreBroadcast();
   updateStreak();
