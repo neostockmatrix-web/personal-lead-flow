@@ -632,3 +632,59 @@ select, input[type="text"], input[type="date"], input[type="number"], textarea {
 .b3-input::placeholder{color:#475569;}
 textarea,input[type="text"],input[type="date"],input[type="number"],select{color:#f0f4f8 !important;background:#1e293b !important;border:1px solid #334155 !important;}
 ::placeholder{color:#475569 !important;opacity:1;}
+
+.ai-alert-hint{font-size:.68rem;line-height:1.4;color:#64748b;margin-bottom:6px;}
+
+/* Light theme readability overrides */
+body:not([data-theme='dark']){--text:#0f172a;--text1:#0f172a;--text2:#334155;--text-muted:#475569;--text-dim:#64748b;--bg2:#f8fafc;--bg3:#eef2f7;}
+body:not([data-theme='dark']) .dp-zone,
+body:not([data-theme='dark']) .dp-guide,
+body:not([data-theme='dark']) .dp-overview,
+body:not([data-theme='dark']) .dp-calls{color:#0f172a;background:#ffffff;border-color:#cbd5e1;}
+body:not([data-theme='dark']) .dp-zone h3,
+body:not([data-theme='dark']) .dp-zone h4,
+body:not([data-theme='dark']) .dp-guide-card summary,
+body:not([data-theme='dark']) .dp-call-name{color:#0f172a !important;}
+body:not([data-theme='dark']) .dp-guide-card p,
+body:not([data-theme='dark']) .dp-guide-card li,
+body:not([data-theme='dark']) .dp-task-meta,
+body:not([data-theme='dark']) .dp-empty,
+body:not([data-theme='dark']) .dp-call-status,
+body:not([data-theme='dark']) #outputInsight,
+body:not([data-theme='dark']) #mmMsg,
+body:not([data-theme='dark']) #scoreMsg,
+body:not([data-theme='dark']) .study-entry,
+body:not([data-theme='dark']) .insight-prev-item,
+body:not([data-theme='dark']) .ai-formula-hint,
+body:not([data-theme='dark']) .ai-alert-hint{color:#475569 !important;}
+body:not([data-theme='dark']) .dp-zone textarea,
+body:not([data-theme='dark']) .dp-zone input[type="text"],
+body:not([data-theme='dark']) .b3-input,
+body:not([data-theme='dark']) textarea,
+body:not([data-theme='dark']) input[type="text"],
+body:not([data-theme='dark']) input[type="date"],
+body:not([data-theme='dark']) input[type="number"],
+body:not([data-theme='dark']) select{color:#0f172a !important;background:#f8fafc !important;border:1px solid #cbd5e1 !important;}
+body:not([data-theme='dark']) .dp-zone button,
+body:not([data-theme='dark']) .group-tag,
+body:not([data-theme='dark']) .bc-toggle,
+body:not([data-theme='dark']) .fu-tab,
+body:not([data-theme='dark']) .sptab{color:#0f172a !important;}
+body:not([data-theme='dark']) .group-tag{background:#e2e8f0 !important;border-color:#94a3b8 !important;}
+body:not([data-theme='dark']) .group-tag.sent{background:#dcfce7 !important;color:#166534 !important;border-color:#22c55e !important;}
+body:not([data-theme='dark']) .ai-label{color:#334155;}
+body:not([data-theme='dark']) .ai-bar-wrap{background:rgba(15,23,42,.12);}
+body:not([data-theme='dark']) .lead-id,
+body:not([data-theme='dark']) .aging-row,
+body:not([data-theme='dark']) .prod-val,
+body:not([data-theme='dark']) .h-date,
+body:not([data-theme='dark']) .timeline-date,
+body:not([data-theme='dark']) .entry-meta{color:#64748b !important;}
+body:not([data-theme='dark']) .history-item,
+body:not([data-theme='dark']) .timeline-text,
+body:not([data-theme='dark']) .prod-name,
+body:not([data-theme='dark']) .tag-row .lead-tag{color:#334155 !important;}
+body:not([data-theme='dark']) .lead-value,
+body:not([data-theme='dark']) .next-date,
+body:not([data-theme='dark']) .entry-body,
+body:not([data-theme='dark']) .kb-card h4{color:#0f172a !important;}
